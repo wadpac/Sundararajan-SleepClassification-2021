@@ -15,10 +15,10 @@ import seaborn as sns
 sns.set(style='whitegrid')
 
 # Get Euclidean Norm minus One
-def get_enmo(x,y,z):
+def get_ENMO(x,y,z):
     enorm = np.sqrt(x*x + y*y + z*z)
-    enmo = np.maximum(enorm-1.0, 0.0)
-    return enmo
+    ENMO = np.maximum(enorm-1.0, 0.0)
+    return ENMO
 
 # Get tilt angles
 def get_tilt_angles(x,y,z):
@@ -27,8 +27,8 @@ def get_tilt_angles(x,y,z):
     angle_z = np.arctan2(z, np.sqrt(x*x + y*y)) * 180.0/math.pi
     return angle_x, angle_y, angle_z
    
-def compute_entropy(df):
-    hist, bin_edges = np.histogram(df, bins=50)
+def compute_entropy(df, bins=20):
+    hist, bin_edges = np.histogram(df, bins=bins)
     p = hist/float(hist.sum())
     ent = entropy(p)
     return ent
@@ -42,9 +42,10 @@ def get_stats(timestamp, feature, time_interval):
     feat_min = feat_df.resample(str(time_interval)+'S').min()
     feat_max = feat_df.resample(str(time_interval)+'S').max()
     feat_mad = feat_df.resample(str(time_interval)+'S').apply(pd.DataFrame.mad)
-    feat_ent = feat_df.resample(str(time_interval)+'S').apply(compute_entropy)
-    stats = np.vstack((feat_mean['feature'], feat_std['feature'], feat_min['feature'], \
-                       feat_max['feature'], feat_mad['feature'], feat_ent['feature'])).T
+    feat_ent1 = feat_df.resample(str(time_interval)+'S').apply(compute_entropy, bins=20)
+    feat_ent2 = feat_df.resample(str(time_interval)+'S').apply(compute_entropy, bins=200)
+    stats = np.vstack((feat_mean['feature'], feat_std['feature'], feat_min['feature'], 
+                       feat_max['feature'], feat_mad['feature'], feat_ent1['feature'], feat_ent2['feature'])).T
     return stats
 
 def get_categ(df, default='NaN'):
@@ -64,14 +65,14 @@ def get_dominant_categ(timestamp, categ, time_interval, default='NaN'):
     dom_categ = categ_df.resample(str(time_interval)+'S').apply(get_categ, default=default)
     return np.array(dom_categ['category'])   
 
-def get_LIDS(timestamp, enmo, time_interval):
-    df = pd.concat((timestamp, pd.Series(enmo)), axis=1)
-    df.columns = ['timestamp','enmo']
+def get_LIDS(timestamp, ENMO):
+    df = pd.concat((timestamp, pd.Series(ENMO)), axis=1)
+    df.columns = ['timestamp','ENMO']
     df.set_index('timestamp', inplace=True)
     
-    df['binary_classification'] = np.where(enmo < 0.02, 0, 1) # assuming enmo is in g
-    binary_classification_smooth = df['binary_classification'].rolling('600s').sum() # 10-minute rolling sum
-    df['LIDS_unfiltered'] = 100.0 / (binary_classification_smooth + 1.0)
+    df['ENMO_sub'] = np.where(ENMO < 0.02, 0, ENMO-0.02) # assuming ENMO is in g
+    ENMO_sub_smooth = df['ENMO_sub'].rolling('600s').sum() # 10-minute rolling sum
+    df['LIDS_unfiltered'] = 100.0 / (ENMO_sub_smooth + 1.0)
     LIDS = df['LIDS_unfiltered'].rolling('1800s').mean().values # 30-minute rolling average
     return LIDS
 
@@ -124,28 +125,20 @@ def main(argv):
     if not os.path.exists(outdir):
         os.makedirs(outdir)
     
-    enmo_dir = create_fig_dir(outdir,'enmo')
-    angx_dir = create_fig_dir(outdir,'angle_x')
-    angy_dir = create_fig_dir(outdir,'angle_y')
+    ENMO_dir = create_fig_dir(outdir,'ENMO')
     angz_dir = create_fig_dir(outdir,'angle_z')
+    LIDS_dir = create_fig_dir(outdir,'LIDS')
     
-    enmo_mean_dir = create_fig_dir(outdir,'enmo_mean')
-    angx_mean_dir = create_fig_dir(outdir,'angx_mean')
-    angy_mean_dir = create_fig_dir(outdir,'angy_mean')
+    ENMO_mean_dir = create_fig_dir(outdir,'ENMO_mean')
     angz_mean_dir = create_fig_dir(outdir,'angz_mean')
+    LIDS_mean_dir = create_fig_dir(outdir,'LIDS_mean')
     
-    lids_dir = create_fig_dir(outdir,'LIDS')
+    # Sleep states
+    states = ['Wake','NREM 1','NREM 2','NREM 3','REM']
     
     files = os.listdir(indir)
     for idx,fname in enumerate(files):
         print('Processing ' + fname)
-        
-        # Uncomment for PSGNewcastle2015 data
-        user = fname.split('_')[0]
-        position = fname.split('_')[1]
-        
-        # Uncomment for UPenn_Axivity data
-        #user = fname.split('.f5')[0][-4:]
         
         fh = h5py.File(os.path.join(indir,fname), 'r')
         x = np.array(fh['X'])
@@ -155,66 +148,71 @@ def main(argv):
         timestamp = pd.to_datetime(timestamp, format='%Y-%m-%d %H:%M:%S.%f')
         
         # Get ENMO and acceleration angles
-        enmo = get_enmo(x,y,z)
+        ENMO = get_ENMO(x,y,z)
         angle_x, angle_y, angle_z = get_tilt_angles(x,y,z)
+        # Get LIDS (Locomotor Inactivity During Sleep)
+        LIDS = get_LIDS(timestamp, ENMO)
         
         # Get statistics of features for given time intervals
-        enmo_stats = get_stats(timestamp, enmo, time_interval)
-        angle_x_stats = get_stats(timestamp, angle_x, time_interval)
-        angle_y_stats = get_stats(timestamp, angle_y, time_interval)
+        ENMO_stats = get_stats(timestamp, ENMO, time_interval)
         angle_z_stats = get_stats(timestamp, angle_z, time_interval)
-        feat = np.hstack((enmo_stats, angle_x_stats, angle_y_stats, angle_z_stats))
+        LIDS_stats = get_stats(timestamp, LIDS, time_interval)
+        feat = np.hstack((ENMO_stats, angle_z_stats, LIDS_stats))
                
         # Get nonwear for each interval
         nonwear = np.array(fh['Nonwear'])
         nonwear_agg = get_dominant_categ(timestamp, nonwear, time_interval, default=True)
         
+        # Standardize label names for both datasets
         # Get label for each interval
-        label = np.array([x.decode('utf8') for x in np.array(fh['SleepState'])])
+        label = np.array([x.decode('utf8') for x in np.array(fh['SleepState'])], dtype=object)
+        label[label == 'W'] = 'Wake'
+        label[label == 'N1'] = 'NREM 1'
+        label[label == 'N2'] = 'NREM 2'
+        label[label == 'N3'] = 'NREM 3'
+        label[label == 'R'] = 'REM'
         label_agg = get_dominant_categ(timestamp, label, time_interval)
-        # Get sleep state categories
-        if idx == 0:
-            states = list(np.sort(np.unique(label)))
-            states = [st for st in states if st != 'NaN']
           
         # Get valid features and labels
         feat_valid = feat[(nonwear_agg == False) & (label_agg != 'NaN'),:]
         label_valid = label_agg[(nonwear_agg == False) & (label_agg != 'NaN')]
         
-        # Get LIDS (Locomotor Inactivity During Sleep)
-        LIDS = get_LIDS(timestamp, enmo, time_interval)
-        save_ts_plot(LIDS, label, nonwear, states, os.path.join(lids_dir,fname.split('.h5')[0]+'.jpg'))
-        continue # for debugging
-        
         # Write features to CSV file
         data = np.hstack((feat_valid, label_valid.reshape(-1,1)))
-        cols = ['enmo_mean','enmo_std','enmo_min','enmo_max','enmo_mad','enmo_entropy', \
-                'angx_mean','angx_std','angx_min','angx_max','angx_mad','angx_entropy', \
-                'angy_mean','angy_std','angy_min','angy_max','angy_mad','angy_entropy', \
-                'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy', 'label']
+        cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy1','ENMO_entropy1', 
+                'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy1','angz_entropy2', 
+                'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy1','LIDS_entropy2','label']
         df = pd.DataFrame(data=data, columns=cols)
-        df['user'] = user
-        # Uncomment for PSGNewcastle2015 data
+        
+#        # Uncomment for PSGNewcastle2015 data
+#        user = fname.split('_')[0]
+#        position = fname.split('_')[1]
+#        dataset = 'Newcastle'        
+        # Uncomment for UPenn_Axivity data
+        user = fname.split('.h5')[0][-4:]
+        position = 'NaN'
+        dataset = 'UPenn'
+        
+        df['user'] = user  
         df['position'] = position
+        df['dataset'] = dataset
         
         # Save data to CSV
         if idx == 0:
-            df.to_csv(os.path.join(outdir,'sleep_data.csv'), sep=',', mode='w', index=False, header=True)
+            df.to_csv(os.path.join(outdir,'sleep_data_' + str(time_interval) + 's.csv'), sep=',', mode='w', index=False, header=True)
         else:
-            df.to_csv(os.path.join(outdir,'sleep_data.csv'), sep=',', mode='a', index=False, header=False)
+            df.to_csv(os.path.join(outdir,'sleep_data_' + str(time_interval) + 's.csv'), sep=',', mode='a', index=False, header=False)
         
         ############## Plot features #####################
 
         # Plot features after aggregation
-        save_ts_plot(enmo_stats[:,0], label_agg, nonwear_agg, states, os.path.join(enmo_dir,fname.split('.h5')[0]+'_after_agg.jpg'))
-        save_ts_plot(angle_x_stats[:,0], label_agg, nonwear_agg, states, os.path.join(angx_dir,fname.split('.h5')[0]+'_after_agg.jpg'))
-        save_ts_plot(angle_y_stats[:,0], label_agg, nonwear_agg, states, os.path.join(angy_dir,fname.split('.h5')[0]+'_after_agg.jpg'))
-        save_ts_plot(angle_z_stats[:,0], label_agg, nonwear_agg, states, os.path.join(angz_dir,fname.split('.h5')[0]+'_after_agg.jpg')) 
+        save_ts_plot(ENMO_stats[:,0], label_agg, nonwear_agg, states, os.path.join(ENMO_dir,fname.split('.h5')[0]+'.jpg'))
+        save_ts_plot(angle_z_stats[:,0], label_agg, nonwear_agg, states, os.path.join(angz_dir,fname.split('.h5')[0]+'.jpg')) 
+        save_ts_plot(LIDS_stats[:,0], label_agg, nonwear_agg, states, os.path.join(LIDS_dir,fname.split('.h5')[0]+'.jpg')) 
         
-        save_agg_plot(df, 'enmo_mean', states, os.path.join(enmo_mean_dir,fname.split('.h5')[0]+'.jpg'))
-        save_agg_plot(df, 'angx_mean', states, os.path.join(angx_mean_dir,fname.split('.h5')[0]+'.jpg'))
-        save_agg_plot(df, 'angy_mean', states, os.path.join(angy_mean_dir,fname.split('.h5')[0]+'.jpg'))
+        save_agg_plot(df, 'ENMO_mean', states, os.path.join(ENMO_mean_dir,fname.split('.h5')[0]+'.jpg'))
         save_agg_plot(df, 'angz_mean', states, os.path.join(angz_mean_dir,fname.split('.h5')[0]+'.jpg'))
+        save_agg_plot(df, 'LIDS_mean', states, os.path.join(LIDS_mean_dir,fname.split('.h5')[0]+'.jpg'))
         
         #break    
     

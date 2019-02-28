@@ -11,9 +11,9 @@ from collections import Counter
 def calibrate(x, y, z, temperature, calib_df):
     mean_temp = np.mean(temperature)
     temp = temperature - mean_temp
-    cx = x * calib_df['scale'][0] + calib_df['offset'][0] + temp * calib_df['tempoffset'][0]
-    cy = y * calib_df['scale'][1] + calib_df['offset'][1] + temp * calib_df['tempoffset'][1]
-    cz = z * calib_df['scale'][2] + calib_df['offset'][2] + temp * calib_df['tempoffset'][2]
+    cx = (x * calib_df['scale'][0]) + calib_df['offset'][0] + (temp * calib_df['tempoffset'][0])
+    cy = (y * calib_df['scale'][1]) + calib_df['offset'][1] + (temp * calib_df['tempoffset'][1])
+    cz = (z * calib_df['scale'][2]) + calib_df['offset'][2] + (temp * calib_df['tempoffset'][2])
     return cx,cy,cz
 
 def nonwear_bouts(pd_datetime, nonwear_df):
