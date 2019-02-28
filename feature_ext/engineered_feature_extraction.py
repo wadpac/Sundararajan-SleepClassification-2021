@@ -179,7 +179,7 @@ def main(argv):
         
         # Write features to CSV file
         data = np.hstack((feat_valid, label_valid.reshape(-1,1)))
-        cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy1','ENMO_entropy1', 
+        cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy1','ENMO_entropy2', 
                 'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy1','angz_entropy2', 
                 'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy1','LIDS_entropy2','label']
         df = pd.DataFrame(data=data, columns=cols)
