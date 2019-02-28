@@ -14,11 +14,6 @@ import seaborn as sns
 
 sns.set(style='whitegrid')
 
-# Get Euclidean Norm
-def get_eucnorm(x,y,z):
-    eucnorm = np.sqrt(x*x + y*y + z*z) * 0.10197 # m/s2 to g-unit conversion for acceleration magnitude
-    return eucnorm
-
 # Get Euclidean Norm minus One
 def get_enmo(x,y,z):
     enorm = np.sqrt(x*x + y*y + z*z)
