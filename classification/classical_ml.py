@@ -14,18 +14,33 @@ def main(argv):
     infile = argv[0]
     
     # Read data file
-    df = pd.read_csv(infile)
+    df = pd.read_csv(infile, dtype={'label':object, 'user':object, 'position':object, 'dataset':object})
     
     # Split data into train/validation/test based on users, not on samples
+    # Use similar split up for Newcastle and UPenn datasets such that both 
+    # are present in all partitions
     print('... Splitting data for hyperparameter search')
-    users = list(set(df['user']))
-    users_rest, users_test = train_test_split(users, test_size=0.3, random_state=42)
-    users_train, users_val = train_test_split(users_rest, test_size=0.15, random_state=42)
+    users1 = list(set(df.loc[df['dataset'] == 'Newcastle','user']))
+    users1_rest, users1_test = train_test_split(users1, test_size=0.3, random_state=42)
+    users1_train, users1_val = train_test_split(users1_rest, test_size=0.2, random_state=42)
+    users2 = list(set(df.loc[df['dataset'] == 'UPenn','user']))
+    users2_rest, users2_test = train_test_split(users2, test_size=0.3, random_state=42)
+    users2_train, users2_val = train_test_split(users2_rest, test_size=0.2, random_state=42)
+    users = users1 + users2
+    users_rest = users1_rest + users2_rest
+    users_train = users1_train + users2_train
+    users_val = users1_val + users2_val
+    users_test = users1_test + users2_test
         
-    feat_cols = ['enmo_mean','enmo_std','enmo_min','enmo_max','enmo_mad','enmo_entropy', \
-                 'angx_mean','angx_std','angx_min','angx_max','angx_mad','angx_entropy', \
-                 'angy_mean','angy_std','angy_min','angy_max','angy_mad','angy_entropy', \
-                 'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy']
+#    feat_cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy1','ENMO_entropy2', \
+#                 'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy1','angz_entropy2', \
+#                 'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy1','LIDS_entropy2'
+#]
+    feat_cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy', \
+                 'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy', \
+                 'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy'] 
+
+
     df_train = df[df['user'].isin(users_rest)].reset_index()
     X_train = df_train[feat_cols].values
     y_train = df_train['label'].values
