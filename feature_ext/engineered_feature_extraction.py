@@ -185,13 +185,13 @@ def main(argv):
         df = pd.DataFrame(data=data, columns=cols)
         
 #        # Uncomment for PSGNewcastle2015 data
-#        user = fname.split('_')[0]
-#        position = fname.split('_')[1]
-#        dataset = 'Newcastle'        
+        user = fname.split('_')[0]
+        position = fname.split('_')[1]
+        dataset = 'Newcastle'        
         # Uncomment for UPenn_Axivity data
-        user = fname.split('.h5')[0][-4:]
-        position = 'NaN'
-        dataset = 'UPenn'
+#        user = fname.split('.h5')[0][-4:]
+#        position = 'NaN'
+#        dataset = 'UPenn'
         
         df['user'] = user  
         df['position'] = position
@@ -205,14 +205,14 @@ def main(argv):
         
         ############## Plot features #####################
 
-        # Plot features after aggregation
-        save_ts_plot(ENMO_stats[:,0], label_agg, nonwear_agg, states, os.path.join(ENMO_dir,fname.split('.h5')[0]+'.jpg'))
-        save_ts_plot(angle_z_stats[:,0], label_agg, nonwear_agg, states, os.path.join(angz_dir,fname.split('.h5')[0]+'.jpg')) 
-        save_ts_plot(LIDS_stats[:,0], label_agg, nonwear_agg, states, os.path.join(LIDS_dir,fname.split('.h5')[0]+'.jpg')) 
-        
-        save_agg_plot(df, 'ENMO_mean', states, os.path.join(ENMO_mean_dir,fname.split('.h5')[0]+'.jpg'))
-        save_agg_plot(df, 'angz_mean', states, os.path.join(angz_mean_dir,fname.split('.h5')[0]+'.jpg'))
-        save_agg_plot(df, 'LIDS_mean', states, os.path.join(LIDS_mean_dir,fname.split('.h5')[0]+'.jpg'))
+#        # Plot features after aggregation
+#        save_ts_plot(ENMO_stats[:,0], label_agg, nonwear_agg, states, os.path.join(ENMO_dir,fname.split('.h5')[0]+'.jpg'))
+#        save_ts_plot(angle_z_stats[:,0], label_agg, nonwear_agg, states, os.path.join(angz_dir,fname.split('.h5')[0]+'.jpg')) 
+#        save_ts_plot(LIDS_stats[:,0], label_agg, nonwear_agg, states, os.path.join(LIDS_dir,fname.split('.h5')[0]+'.jpg')) 
+#        
+#        save_agg_plot(df, 'ENMO_mean', states, os.path.join(ENMO_mean_dir,fname.split('.h5')[0]+'.jpg'))
+#        save_agg_plot(df, 'angz_mean', states, os.path.join(angz_mean_dir,fname.split('.h5')[0]+'.jpg'))
+#        save_agg_plot(df, 'LIDS_mean', states, os.path.join(LIDS_mean_dir,fname.split('.h5')[0]+'.jpg'))
         
         #break    
     
