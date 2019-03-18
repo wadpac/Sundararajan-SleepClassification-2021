@@ -3,6 +3,7 @@ import sys,os
 import numpy as np
 import pandas as pd
 import h5py
+import math
 import linecache
 from datetime import datetime, timedelta, time
 from collections import Counter
@@ -132,7 +133,16 @@ def preproc_psgnewcastle(data_fname=None, lbl_fname=None, calib_fname=None, \
     print('... Calibrating data')
     calib_df = pd.read_csv(calib_fname, sep='\t')
     cx, cy, cz = calibrate(x, y, z, temp, calib_df)
-    
+
+    # Perform flipping x and y axes to ensure standard orientation
+    # For correct orientation, x-angle should be mostly negative
+    # So, if median x-angle is positive, flip both x and y axes
+    # Ref: https://github.com/wadpac/hsmm4acc/blob/524743744068e83f468a4e217dde745048a625fd/UKMovementSensing/prepacc.py
+    angx = np.arctan2(cx, np.sqrt(cy*cy + cz*cz)) * 180.0/math.pi
+    if np.median(angx) > 0:
+        cx *= -1
+        cy *= -1
+ 
     # Determine non-wear bouts
     print('... Determining nonwear bouts')
     nonwear_df = pd.read_csv(nonwear_fname, sep='\t')
