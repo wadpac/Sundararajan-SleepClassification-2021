@@ -7,13 +7,6 @@ import pandas as pd
 from scipy.stats import entropy
 from collections import Counter
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-sns.set(style='whitegrid')
-
 # Get Euclidean Norm minus One
 def get_ENMO(x,y,z):
     enorm = np.sqrt(x*x + y*y + z*z)
@@ -32,6 +25,18 @@ def compute_entropy(df, bins=20):
     p = hist/float(hist.sum())
     ent = entropy(p)
     return ent
+
+# Get difference of feature with respect to prev or next interval
+def get_diff_feat(feature, direction='prev'):
+    diff = np.zeros(len(feature))
+    if direction == 'prev':
+        for i in range(1,len(feature)):
+            diff[i] = feature[i]-feature[i-1]
+    else:
+        for i in range(len(feature)-1):
+            diff[i] = feature[i+1]-feature[i]
+
+    return diff
     
 # Aggregate statistics of features over a given time interval
 def get_stats(timestamp, feature, time_interval):
@@ -44,8 +49,11 @@ def get_stats(timestamp, feature, time_interval):
     feat_mad = feat_df.resample(str(time_interval)+'S').apply(pd.DataFrame.mad)
     feat_ent1 = feat_df.resample(str(time_interval)+'S').apply(compute_entropy, bins=20)
     feat_ent2 = feat_df.resample(str(time_interval)+'S').apply(compute_entropy, bins=200)
+    feat_prevdiff = get_diff_feat(feat_mean['feature'], 'prev')
+    feat_nextdiff = get_diff_feat(feat_mean['feature'], 'next')
     stats = np.vstack((feat_mean['feature'], feat_std['feature'], feat_min['feature'], 
-                       feat_max['feature'], feat_mad['feature'], feat_ent1['feature'], feat_ent2['feature'])).T
+                       feat_max['feature'], feat_mad['feature'], feat_ent1['feature'], 
+                       feat_ent2['feature'], feat_prevdiff, feat_nextdiff)).T
     return stats
 
 def get_categ(df, default='NaN'):
@@ -76,47 +84,6 @@ def get_LIDS(timestamp, ENMO):
     LIDS = df['LIDS_unfiltered'].rolling('1800s').mean().values # 30-minute rolling average
     return LIDS
 
-def create_fig_dir(outdir,dirname):
-    fig_dir = os.path.join(outdir,'figures',dirname)
-    if not os.path.exists(fig_dir):
-        os.makedirs(fig_dir)
-    return fig_dir
-
-# Save time series plot
-def save_ts_plot(feature, label, nonwear, states, outfile):     
-    strip_samp = int(len(feature)/10)
-    nsamp = len(feature)
-    nstrips = nsamp // strip_samp
-    
-    plt.figure(num=1, figsize=(2*nstrips,3*nstrips))
-    fig, axes = plt.subplots(nstrips,1,sharex=True,num=1)
-    min_ylim = min(feature)
-    max_ylim = max(feature)
-    for strip in range(nstrips):
-        y = feature[strip*strip_samp:(strip+1)*strip_samp]
-        lbl = label[strip*strip_samp:(strip+1)*strip_samp]
-        nw = nonwear[strip*strip_samp:(strip+1)*strip_samp]
-        x = range(len(y))
-        axes[strip].plot(x,y, color='black')
-        axes[strip].set_ylim(min_ylim, max_ylim)
-        st1 = axes[strip].fill_between(x, min_ylim, max_ylim, where=(lbl==states[0]), facecolor='green', alpha=0.3)
-        st2 = axes[strip].fill_between(x, min_ylim, max_ylim, where=(lbl==states[1]), facecolor='blue', alpha=0.3)
-        st3 = axes[strip].fill_between(x, min_ylim, max_ylim, where=(lbl==states[2]), facecolor='yellow', alpha=0.3)
-        st4 = axes[strip].fill_between(x, min_ylim, max_ylim, where=(lbl==states[3]), facecolor='magenta', alpha=0.3)
-        st5 = axes[strip].fill_between(x, min_ylim, max_ylim, where=(lbl==states[4]), facecolor='cyan', alpha=0.3)
-        axes[strip].fill_between(x, min_ylim, max_ylim, where= nw==True, facecolor='red', alpha=0.5)
-    fig.legend((st1,st2,st3,st4,st5), states, loc='lower center', ncol=5)
-        
-    plt.savefig(outfile)
-    plt.close('all')
-    
-def save_agg_plot(df, col_str, order, outfile):
-    plt.figure()
-    df[col_str] = df[col_str].astype(float)
-    sns.boxplot(x="label", y=col_str, data=df, order=order)
-    plt.savefig(outfile)
-    plt.close('all')
-    
 def main(argv):
     indir = argv[0]
     time_interval = float(argv[1]) # time interval of feature aggregation in seconds
@@ -124,14 +91,6 @@ def main(argv):
     
     if not os.path.exists(outdir):
         os.makedirs(outdir)
-    
-    ENMO_dir = create_fig_dir(outdir,'ENMO')
-    angz_dir = create_fig_dir(outdir,'angle_z')
-    LIDS_dir = create_fig_dir(outdir,'LIDS')
-    
-    ENMO_mean_dir = create_fig_dir(outdir,'ENMO_mean')
-    angz_mean_dir = create_fig_dir(outdir,'angz_mean')
-    LIDS_mean_dir = create_fig_dir(outdir,'LIDS_mean')
     
     # Sleep states
     states = ['Wake','NREM 1','NREM 2','NREM 3','REM']
@@ -179,19 +138,19 @@ def main(argv):
         
         # Write features to CSV file
         data = np.hstack((feat_valid, label_valid.reshape(-1,1)))
-        cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy1','ENMO_entropy2', 
-                'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy1','angz_entropy2', 
-                'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy1','LIDS_entropy2','label']
+        cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy1','ENMO_entropy2','ENMO_prevdiff','ENMO_nextdiff', 
+                'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy1','angz_entropy2','angz_prevdiff','angz_nextdiff', 
+                'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy1','LIDS_entropy2','LIDS_prevdiff','LIDS_nextdiff','label']
         df = pd.DataFrame(data=data, columns=cols)
         
         # Uncomment for PSGNewcastle2015 data
-#        user = fname.split('_')[0]
-#        position = fname.split('_')[1]
-#        dataset = 'Newcastle'        
+        user = fname.split('_')[0]
+        position = fname.split('_')[1]
+        dataset = 'Newcastle'        
         # Uncomment for UPenn_Axivity data
-        user = fname.split('.h5')[0][-4:]
-        position = 'NaN'
-        dataset = 'UPenn'
+#        user = fname.split('.h5')[0][-4:]
+#        position = 'NaN'
+#        dataset = 'UPenn'
         
         df['user'] = user  
         df['position'] = position
@@ -202,17 +161,6 @@ def main(argv):
             df.to_csv(os.path.join(outdir,'sleep_data_' + str(time_interval) + 's.csv'), sep=',', mode='w', index=False, header=True)
         else:
             df.to_csv(os.path.join(outdir,'sleep_data_' + str(time_interval) + 's.csv'), sep=',', mode='a', index=False, header=False)
-        
-        ############## Plot features #####################
-
-#        # Plot features after aggregation
-#        save_ts_plot(ENMO_stats[:,0], label_agg, nonwear_agg, states, os.path.join(ENMO_dir,fname.split('.h5')[0]+'.jpg'))
-#        save_ts_plot(angle_z_stats[:,0], label_agg, nonwear_agg, states, os.path.join(angz_dir,fname.split('.h5')[0]+'.jpg')) 
-#        save_ts_plot(LIDS_stats[:,0], label_agg, nonwear_agg, states, os.path.join(LIDS_dir,fname.split('.h5')[0]+'.jpg')) 
-#        
-#        save_agg_plot(df, 'ENMO_mean', states, os.path.join(ENMO_mean_dir,fname.split('.h5')[0]+'.jpg'))
-#        save_agg_plot(df, 'angz_mean', states, os.path.join(angz_mean_dir,fname.split('.h5')[0]+'.jpg'))
-#        save_agg_plot(df, 'LIDS_mean', states, os.path.join(LIDS_mean_dir,fname.split('.h5')[0]+'.jpg'))
         
         #break    
     
