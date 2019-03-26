@@ -10,9 +10,10 @@ import pickle
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn import manifold
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report
+from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report, confusion_matrix
 from sklearn.pipeline import Pipeline
 
 from imblearn.combine import SMOTEENN, SMOTETomek
@@ -24,36 +25,64 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def get_classification_report(y_true, y_pred, sleep_states):
-    precision, recall, fscore, support = precision_recall_fscore_support(y_true, y_pred, average='macro')
-    accuracy = accuracy_score(y_true, y_pred)
-    print('Precision = %0.4f' % (precision*100.0))
+def get_classification_report(pred_list, sleep_states):
+    nfolds = len(pred_list)
+    precision = 0.0; recall = 0.0; fscore = 0.0; accuracy = 0.0
+    class_metrics = {}
+    for state in sleep_states:
+        class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0}
+    confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
+    for i in range(nfolds):
+        y_true = pred_list[i][0]
+        y_pred = pred_list[i][1]
+        prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred, average='macro')
+        acc = accuracy_score(y_true, y_pred)
+        precision += prec; recall += rec; fscore += fsc; accuracy += acc
+        fold_class_metrics = classification_report(y_true, y_pred, \
+                                              target_names=sleep_states, output_dict=True)
+        for state in sleep_states:
+            class_metrics[state]['precision'] += fold_class_metrics[state]['precision']
+            class_metrics[state]['recall'] += fold_class_metrics[state]['recall']
+            class_metrics[state]['f1-score'] += fold_class_metrics[state]['f1-score']
+
+        fold_conf_mat = confusion_matrix(y_true, y_pred).astype(np.float)
+        for idx,state in enumerate(sleep_states):
+            fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == idx]))
+        confusion_mat = confusion_mat + fold_conf_mat
+
+    precision = precision/nfolds; recall = recall/nfolds
+    fscore = fscore/nfolds; accuracy = accuracy/nfolds
+    print('\nPrecision = %0.4f' % (precision*100.0))
     print('Recall = %0.4f' % (recall*100.0))
     print('F-score = %0.4f' % (fscore*100.0))
     print('Accuracy = %0.4f' % (accuracy*100.0))
-    print(classification_report(y_true, y_pred, target_names=sleep_states))
+        
+    # Classwise report
+    print('\nClass\t\tPrecision\tRecall\t\tF1-score')
+    for state in sleep_states:
+        class_metrics[state]['precision'] = class_metrics[state]['precision'] / nfolds
+        class_metrics[state]['recall'] = class_metrics[state]['recall'] / nfolds
+        class_metrics[state]['f1-score'] = class_metrics[state]['f1-score'] / nfolds
+        print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f' % (state, class_metrics[state]['precision'], \
+                          class_metrics[state]['recall'], class_metrics[state]['f1-score']))
+    print('\n')
 
-def get_feat_importances(clf, feature_names):
-    importances = clf.feature_importances_
+    # Confusion matrix
+    confusion_mat = confusion_mat / nfolds
+    print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\n')
+    for i in range(confusion_mat.shape[0]):
+        #print('%s\t%0.4f' % (sleep_states[i], confusion_mat[i,0]))
+        print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1], confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
+    print('\n')    
+
+def get_feat_importances_report(importances, feature_names):
     indices = np.argsort(importances)[::-1]
     print('Feature ranking:')
     for i in range(importances.shape[0]):
-        print('%d. %s: %0.4f' % (i,feature_names[indices[i]],importances[indices[i]]))
-
-def get_users(infile):
-    users = []
-    with open(infile,'r') as fp:
-      for line in fp:
-        users.append(line.strip())
-    return users
+        print('%d. %s: %0.4f' % (i+1,feature_names[indices[i]],importances[indices[i]]))
 
 def main(argv):
     infile = argv[0]
-    indir = argv[1]   
-    outdir = argv[2]
-
-    if not os.path.exists(outdir):
-        os.makedirs(outdir)
  
     # Read data file and retain data only corresponding to 5 sleep states
     df = pd.read_csv(infile, dtype={'label':object, 'user':object, 'position':object, 'dataset':object})
@@ -66,134 +95,99 @@ def main(argv):
     for cls in ctr:
       print('%s: %d (%0.2f%%)' % (cls,ctr[cls],ctr[cls]*100.0/len(df))) 
 
-    feat_cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy1','ENMO_entropy2', \
-                 'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy1','angz_entropy2', \
-                 'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy1','LIDS_entropy2'
+    feat_cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy1','ENMO_entropy2', 'ENMO_prevdiff', 'ENMO_nextdiff', \
+                 'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy1','angz_entropy2', 'angz_prevdiff', 'angz_nextdiff', \
+                 'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy1','LIDS_entropy2', 'LIDS_prevdiff', 'LIDS_nextdiff'
 ]
 
     ######################## Partition the datasets #######################
 
-    # Split data into train/validation based on users, not on samples
-    # Use similar split up for Newcastle and UPenn datasets such that both 
-    # are present in all partitions
-    print('... Partitioning data')
-    users_train = get_users(os.path.join(indir,'users_train.txt'))
-    users_val = get_users(os.path.join(indir,'users_val.txt'))
+    # Nested cross-validation - outer CV for estimating model performance
+    # Inner CV for estimating model hyperparameters
 
-    df_train = df[df['user'].isin(users_train)]
-    X_train = df_train[feat_cols].values
-    y_train = df_train['label'].values
-    y_train = np.array([sleep_states.index(y) for y in y_train])
+    # Split data based on users, not on samples, for outer CV
+    # Use Stratified CV for inner CV to ensure similar label distribution
+    X = df[feat_cols].values
+    y = df['label']
+    y = np.array([sleep_states.index(i) for i in y])
+    groups = df['user']
 
-    df_val = df[df['user'].isin(users_val)]
-    X_val = df_val[feat_cols].values
-    y_val = df_val['label'].values
-    y_val = np.array([sleep_states.index(y) for y in y_val])
+    feat_len = X.shape[1]
 
-    ################## Perform ML without balancing dataset #####################
-    
-    print('\n... Without balancing data ...')
-    start_time = time.time()
-    y_train_str = [sleep_states[y] for y in y_train]
-    print(Counter(y_train_str))
+    # Outer CV
+    imbalanced_pred = []; imbalanced_imp = np.zeros(feat_len)
+    balanced_pred = []; balanced_imp = np.zeros(feat_len)
+    outer_cv_splits = 5; inner_cv_splits = 3
+    group_kfold = GroupKFold(n_splits=outer_cv_splits)
+    for train_indices, test_indices in group_kfold.split(X,y,groups):
+        out_fold_X_train = X[train_indices,:]; out_fold_X_test = X[test_indices,:]
+        out_fold_y_train = y[train_indices]; out_fold_y_test = y[test_indices]
 
-    pipe = Pipeline([('scl', StandardScaler()), \
+        # Inner CV
+        strat_kfold = StratifiedKFold(n_splits=inner_cv_splits, random_state=0, shuffle=True)       
+        #################### Without balancing #######################
+
+        custom_cv_indices = []
+        for grp_train_idx, grp_test_idx in strat_kfold.split(out_fold_X_train,out_fold_y_train):
+            custom_cv_indices.append((grp_train_idx, grp_test_idx))
+ 
+        pipe = Pipeline([('scl', StandardScaler()), \
                      ('clf', RandomForestClassifier(class_weight='balanced', \
-                     n_estimators=100, max_depth=None, \
                      random_state=0))])
     
-    # Perform random search for hyper-parameter tuning to find best estimator using validation data
-    # Fit training data to best estimator and compute metrics on validation data
-    print('... Searching for suitable hyperparameters')
-    search_params = {'clf__n_estimators':[50,100,150,200,250,300,500], \
+        search_params = {'clf__n_estimators':[50,100,150,200,250,300,500], \
                      'clf__max_depth': [5,10,20,None]}
-    cv_clf = RandomizedSearchCV(estimator=pipe, param_distributions=search_params, \
-                                cv=3, scoring='f1_macro', n_iter=10, n_jobs=-1)
-    cv_clf.fit(X_train, y_train)
-    print(cv_clf.best_params_)
+        cv_clf = RandomizedSearchCV(estimator=pipe, param_distributions=search_params, \
+                                cv=custom_cv_indices, scoring='f1_macro', n_iter=10, n_jobs=-1)
+        cv_clf.fit(out_fold_X_train, out_fold_y_train)
+        out_fold_y_test_pred = cv_clf.predict(out_fold_X_test)
+        print('Imbalanced', cv_clf.best_params_)
 
-    print('... Predicting output with best estimator')
-    y_val_pred = cv_clf.predict(X_val)
-    get_classification_report(y_val, y_val_pred, sleep_states)
-    get_feat_importances(cv_clf.best_estimator_.named_steps['clf'], feat_cols)
+        imbalanced_pred.append((out_fold_y_test, out_fold_y_test_pred))
+        imbalanced_imp = imbalanced_imp + cv_clf.best_estimator_.named_steps['clf'].feature_importances_
 
-    best_model = {'scl_clf':cv_clf.best_estimator_}
-    pickle.dump(best_model, open(os.path.join(outdir,'no_balancing.pkl'),'wb'))   
+        ################## Balancing with SMOTEENN ###################
 
-    end_time = time.time()
-    print('Time elapsed: %0.2fs' % (end_time-start_time))
-    
-    ############### Perform ML after balancing dataset with SMOTE ###############
-    
-    print('\n... After balancing data with SMOTEENN ...')
-    scaler = StandardScaler()
-    scaler.fit(X_train)
-    X_train_sc = scaler.transform(X_train)
-    X_val_sc = scaler.transform(X_val)
+        scaler = StandardScaler()
+        scaler.fit(out_fold_X_train)
+        out_fold_X_train_sc = scaler.transform(out_fold_X_train)
+        out_fold_X_test_sc = scaler.transform(out_fold_X_test)
 
-    # Resample training data
-    start_time = time.time()
-    smote_enn = SMOTEENN(random_state=0, sampling_strategy='not majority')
-    X_train_resamp_sc, y_train_resamp = smote_enn.fit_resample(X_train_sc, y_train)
-    y_train_resamp_str = [sleep_states[y] for y in y_train_resamp]
-    print(Counter(y_train_resamp_str))
+        # Resample training data
+        smote_enn = SMOTEENN(random_state=0, sampling_strategy='not majority')
+        out_fold_X_train_resamp, out_fold_y_train_resamp = smote_enn.fit_resample(out_fold_X_train_sc, out_fold_y_train)
 
-    # Note: imblearn Pipeline is slow and sklearn pipeline yields poor results 
-    clf = RandomForestClassifier(class_weight='balanced', \
-                                 n_estimators=100, max_depth=None, \
-                                 random_state=0)
+        custom_resamp_cv_indices = []
+        for grp_train_idx, grp_test_idx in strat_kfold.split(out_fold_X_train_resamp,out_fold_y_train_resamp):
+            custom_resamp_cv_indices.append((grp_train_idx, grp_test_idx))
+ 
+        # Note: imblearn Pipeline is slow and sklearn pipeline yields poor results 
+        clf = RandomForestClassifier(class_weight='balanced', \
+                                 max_depth=None, random_state=0)
 
-    print('... Searching for suitable hyperparameters')
-    search_params = {'n_estimators':[50,100,150,200,250,300,500], \
+        search_params = {'n_estimators':[50,100,150,200,250,300,500], \
                      'max_depth': [5,10,20,None]}
-    cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params, \
-                                cv=3, scoring='f1_macro', n_iter=10, n_jobs=-1)
-    cv_clf.fit(X_train_resamp_sc, y_train_resamp)
-    print(cv_clf.best_params_)
-    
-    print('... Predicting output with best estimator')
-    y_val_pred = cv_clf.predict(X_val_sc)
-    get_classification_report(y_val, y_val_pred, sleep_states)
-    get_feat_importances(cv_clf.best_estimator_, feat_cols)
+        cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params, \
+                                cv=custom_resamp_cv_indices, scoring='f1_macro', \
+                                n_iter=10, n_jobs=-1)
+        cv_clf.fit(out_fold_X_train_resamp, out_fold_y_train_resamp)
+        out_fold_y_test_pred = cv_clf.predict(out_fold_X_test_sc)
+        print('Balanced', cv_clf.best_params_)
 
-    best_model = {'scl':scaler, 'smote_enn':smote_enn, 'clf':cv_clf.best_estimator_}
-    pickle.dump(best_model, open(os.path.join(outdir,'balancing_smoteenn.pkl'),'wb'))   
+        balanced_pred.append((out_fold_y_test, out_fold_y_test_pred))
+        balanced_imp = balanced_imp + cv_clf.best_estimator_.feature_importances_
 
-    end_time = time.time()
-    print('Time elapsed: %0.2fs' % (end_time-start_time))
-    
-    ############### Perform ML after balancing dataset with Balanced RF ###############
-    
-    print('\n... After balancing data with Balanced RF ...')
-    start_time = time.time()
-    scaler = StandardScaler()
-    scaler.fit(X_train)
-    X_train_sc = scaler.transform(X_train)
-    X_val_sc = scaler.transform(X_val)
-    
-    print('... Searching for suitable hyperparameters')
-    clf = BalancedRandomForestClassifier(sampling_strategy='not majority', \
-                                         class_weight='balanced_subsample', \
-                                         n_estimators=100, max_depth=None, \
-                                         random_state = 0)
-    
-    search_params = {'n_estimators':[50,100,150,200,250,300,500], \
-                     'max_depth': [5,10,20,None]}
-    cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params, \
-                                cv=3, scoring='f1_macro', n_iter=10, n_jobs=-1)
-    cv_clf.fit(X_train_sc, y_train)
-    print(cv_clf.best_params_)
+    # Get imbalanced classification reports
+    print('############## Imbalanced classification ##############')
+    get_classification_report(imbalanced_pred, sleep_states)
+    imbalanced_imp = imbalanced_imp / float(outer_cv_splits)
+    get_feat_importances_report(imbalanced_imp, feat_cols)
 
-    print('... Predicting output with best estimator')
-    y_val_pred = cv_clf.predict(X_val_sc)
-    get_classification_report(y_val, y_val_pred, sleep_states)
-    get_feat_importances(cv_clf.best_estimator_, feat_cols)
-
-    best_model = {'scl':scaler, 'clf':cv_clf.best_estimator_}
-    pickle.dump(best_model, open(os.path.join(outdir,'balanced_rf.pkl'),'wb'))   
-
-    end_time = time.time()
-    print('Time elapsed: %0.2fs' % (end_time-start_time))
+    # Get balanced classification reports
+    print('############## Balanced classification ##############')
+    get_classification_report(balanced_pred, sleep_states)
+    balanced_imp = balanced_imp / float(outer_cv_splits)
+    get_feat_importances_report(balanced_imp, feat_cols)
     
 if __name__ == "__main__":
     main(sys.argv[1:])
