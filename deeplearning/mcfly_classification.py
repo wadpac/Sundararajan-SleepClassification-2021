@@ -7,6 +7,8 @@ from collections import Counter
 
 from sklearn.model_selection import GroupKFold, StratifiedKFold, RandomizedSearchCV
 
+from metrics import weighted_f1
+
 np.random.seed(2)
 
 def main(argv):
@@ -63,14 +65,14 @@ def main(argv):
       # Generate candidate architectures
       model = modelgen.generate_models(in_X_train.shape, \
                                     number_of_classes=num_classes, \
-                                    number_of_models=1)  
+                                    number_of_models=1, metrics=[weighted_f1])  
 
       # Compare generated architectures on a subset of data for few epochs
       outfile = os.path.join(resultdir, 'model_comparison.json')
       hist, acc, loss = find_architecture.train_models_on_samples(in_X_train, \
                                  in_y_train, in_X_test, in_y_test, model, nr_epochs=5, \
                                  subset_size=300, verbose=True, \
-                                 outputfile=outfile)
+                                 outputfile=outfile, metric='weighted_f1')
       val_acc.append(acc[0])
       models.append(model[0])
 
