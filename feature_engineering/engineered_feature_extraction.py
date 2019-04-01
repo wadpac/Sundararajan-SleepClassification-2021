@@ -19,7 +19,19 @@ def get_tilt_angles(x,y,z):
     angle_y = np.arctan2(y, np.sqrt(x*x + z*z)) * 180.0/math.pi
     angle_z = np.arctan2(z, np.sqrt(x*x + y*y)) * 180.0/math.pi
     return angle_x, angle_y, angle_z
-   
+
+# Get Locomotor Inactivity During Sleep   
+def get_LIDS(timestamp, ENMO):
+    df = pd.concat((timestamp, pd.Series(ENMO)), axis=1)
+    df.columns = ['timestamp','ENMO']
+    df.set_index('timestamp', inplace=True)
+    
+    df['ENMO_sub'] = np.where(ENMO < 0.02, 0, ENMO-0.02) # assuming ENMO is in g
+    ENMO_sub_smooth = df['ENMO_sub'].rolling('600s').sum() # 10-minute rolling sum
+    df['LIDS_unfiltered'] = 100.0 / (ENMO_sub_smooth + 1.0)
+    LIDS = df['LIDS_unfiltered'].rolling('1800s').mean().values # 30-minute rolling average
+    return LIDS
+
 def compute_entropy(df, bins=20):
     hist, bin_edges = np.histogram(df, bins=bins)
     p = hist/float(hist.sum())
@@ -72,17 +84,6 @@ def get_dominant_categ(timestamp, categ, time_interval, default='NaN'):
     categ_df.set_index('timestamp', inplace=True)
     dom_categ = categ_df.resample(str(time_interval)+'S').apply(get_categ, default=default)
     return np.array(dom_categ['category'])   
-
-def get_LIDS(timestamp, ENMO):
-    df = pd.concat((timestamp, pd.Series(ENMO)), axis=1)
-    df.columns = ['timestamp','ENMO']
-    df.set_index('timestamp', inplace=True)
-    
-    df['ENMO_sub'] = np.where(ENMO < 0.02, 0, ENMO-0.02) # assuming ENMO is in g
-    ENMO_sub_smooth = df['ENMO_sub'].rolling('600s').sum() # 10-minute rolling sum
-    df['LIDS_unfiltered'] = 100.0 / (ENMO_sub_smooth + 1.0)
-    LIDS = df['LIDS_unfiltered'].rolling('1800s').mean().values # 30-minute rolling average
-    return LIDS
 
 def main(argv):
     indir = argv[0]
