@@ -169,14 +169,14 @@ def main(argv):
     # Get sequence labels for the user
     seq_label = get_sequential_label(label_agg, nonwear_agg, states)
    
-    # Uncomment for PSGNewcastle2015 data
-    user = fname.split('_')[0]
-    position = fname.split('_')[1]
-    dataset = 'Newcastle'        
-#    # Uncomment for UPenn_Axivity data
-#    user = fname.split('.h5')[0][-4:]
-#    position = 'NaN'
-#    dataset = 'UPenn'
+#    # Uncomment for PSGNewcastle2015 data
+#    user = fname.split('_')[0]
+#    position = fname.split('_')[1]
+#    dataset = 'Newcastle'        
+    # Uncomment for UPenn_Axivity data
+    user = fname.split('.h5')[0][-4:]
+    position = 'NaN'
+    dataset = 'UPenn'
         
     # Break up data into sequences of specified number of non-overlapping tokens
     # If over 70% of sequence is 'O', exclude that sequence 
