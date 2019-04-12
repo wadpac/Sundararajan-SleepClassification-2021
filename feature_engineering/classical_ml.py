@@ -16,6 +16,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report, confusion_matrix
 from sklearn.pipeline import Pipeline
 
+from imblearn.under_sampling import EditedNearestNeighbours
+from imblearn.over_sampling import SMOTE
 from imblearn.combine import SMOTEENN, SMOTETomek
 from imblearn.ensemble import BalancedRandomForestClassifier
 from imblearn.pipeline import Pipeline as ImbPipeline
@@ -119,7 +121,9 @@ def main(argv):
     balanced_pred = []; balanced_imp = np.zeros(feat_len)
     outer_cv_splits = 5; inner_cv_splits = 3
     group_kfold = GroupKFold(n_splits=outer_cv_splits)
+    out_fold = 0
     for train_indices, test_indices in group_kfold.split(X,y,groups):
+        out_fold += 1
         out_fold_X_train = X[train_indices,:]; out_fold_X_test = X[test_indices,:]
         out_fold_y_train = y[train_indices]; out_fold_y_test = y[test_indices]
 
@@ -135,18 +139,20 @@ def main(argv):
                      ('clf', RandomForestClassifier(class_weight='balanced', \
                      random_state=0))])
     
-        search_params = {'clf__n_estimators':[50,100,150,200,250,300,500], \
-                     'clf__max_depth': [5,10,20,None]}
+        print('Fold'+str(out_fold)+' - Imbalanced: Hyperparameter search')
+        search_params = {'clf__n_estimators':[50,100,200,300,500], \
+                     'clf__max_depth': [5,10,None]}
         cv_clf = RandomizedSearchCV(estimator=pipe, param_distributions=search_params, \
-                                cv=custom_cv_indices, scoring='f1_macro', n_iter=10, n_jobs=-1)
+                                cv=custom_cv_indices, scoring='f1_macro', n_iter=5, \
+                                n_jobs=-1, verbose=2)
         cv_clf.fit(out_fold_X_train, out_fold_y_train)
         out_fold_y_test_pred = cv_clf.predict(out_fold_X_test)
-        print('Imbalanced', cv_clf.best_params_)
+        print('Fold'+str(out_fold)+' - Imbalanced', cv_clf.best_params_)
 
         imbalanced_pred.append((out_fold_y_test, out_fold_y_test_pred))
         imbalanced_imp = imbalanced_imp + cv_clf.best_estimator_.named_steps['clf'].feature_importances_
 
-        ################## Balancing with SMOTEENN ###################
+        ################## Balancing with SMOTE ###################
 
         scaler = StandardScaler()
         scaler.fit(out_fold_X_train)
@@ -154,8 +160,15 @@ def main(argv):
         out_fold_X_test_sc = scaler.transform(out_fold_X_test)
 
         # Resample training data
-        smote_enn = SMOTEENN(random_state=0, sampling_strategy='not majority')
-        out_fold_X_train_resamp, out_fold_y_train_resamp = smote_enn.fit_resample(out_fold_X_train_sc, out_fold_y_train)
+        print('Fold'+str(out_fold)+' - Balanced: SMOTE')
+        # Imblearn - Undersampling techniques ENN and Tomek are too slow and 
+        # difficult to parallelize
+        # So stick only with oversampling techniques
+        smote = SMOTE(random_state=0, n_jobs=-1, sampling_strategy='all')
+        #enn = EditedNearestNeighbours(random_state=0, n_jobs=-1, sampling_strategy='all')
+        #smote_enn = SMOTEENN(smote=smote, enn=enn,
+                             random_state=0, sampling_strategy='all')
+        out_fold_X_train_resamp, out_fold_y_train_resamp = smote.fit_resample(out_fold_X_train_sc, out_fold_y_train)
 
         custom_resamp_cv_indices = []
         for grp_train_idx, grp_test_idx in strat_kfold.split(out_fold_X_train_resamp,out_fold_y_train_resamp):
@@ -165,14 +178,15 @@ def main(argv):
         clf = RandomForestClassifier(class_weight='balanced', \
                                  max_depth=None, random_state=0)
 
-        search_params = {'n_estimators':[50,100,150,200,250,300,500], \
-                     'max_depth': [5,10,20,None]}
+        print('Fold'+str(out_fold)+' - Balanced: Hyperparameter search')
+        search_params = {'n_estimators':[50,100,200,300,500], \
+                     'max_depth': [5,10,None]}
         cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params, \
                                 cv=custom_resamp_cv_indices, scoring='f1_macro', \
-                                n_iter=10, n_jobs=-1)
+                                n_iter=5, n_jobs=-1, verbose=2)
         cv_clf.fit(out_fold_X_train_resamp, out_fold_y_train_resamp)
         out_fold_y_test_pred = cv_clf.predict(out_fold_X_test_sc)
-        print('Balanced', cv_clf.best_params_)
+        print('Fold'+str(out_fold)+' - Balanced', cv_clf.best_params_)
 
         balanced_pred.append((out_fold_y_test, out_fold_y_test_pred))
         balanced_imp = balanced_imp + cv_clf.best_estimator_.feature_importances_
