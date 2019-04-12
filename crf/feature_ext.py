@@ -83,7 +83,7 @@ def get_sequential_label(labels, nonwear, states):
   # Rename all other labels based on their previous and next labels
   for i in range(1,len(labels)-1):
     # If nonwear, retain label as 'O'
-    if nonwear[i] is True or labels[i] == 'NaN':
+    if nonwear[i] is True or labels[i] not in states:
       continue 
     # Label beginning of state
     if labels[i] != labels[i-1]:
@@ -123,6 +123,7 @@ def main(argv):
   num_seq_tokens = int(argv[2]) # Number of tokens in a sequence
   outdir = argv[3]
 
+  outdir = os.path.join(outdir, 'seq_'+str(num_seq_tokens)+'tok_'+str(token_interval)+'sec') 
   if not os.path.exists(outdir):
     os.makedirs(outdir)
   
@@ -169,14 +170,14 @@ def main(argv):
     # Get sequence labels for the user
     seq_label = get_sequential_label(label_agg, nonwear_agg, states)
    
-#    # Uncomment for PSGNewcastle2015 data
-#    user = fname.split('_')[0]
-#    position = fname.split('_')[1]
-#    dataset = 'Newcastle'        
-    # Uncomment for UPenn_Axivity data
-    user = fname.split('.h5')[0][-4:]
-    position = 'NaN'
-    dataset = 'UPenn'
+    # Uncomment for PSGNewcastle2015 data
+    user = fname.split('_')[0]
+    position = fname.split('_')[1]
+    dataset = 'Newcastle'        
+#    # Uncomment for UPenn_Axivity data
+#    user = fname.split('.h5')[0][-4:]
+#    position = 'NaN'
+#    dataset = 'UPenn'
         
     # Break up data into sequences of specified number of non-overlapping tokens
     # If over 70% of sequence is 'O', exclude that sequence 
