@@ -62,26 +62,27 @@ def rotation(X):
   angle = np.random.uniform(low=-np.pi, high=np.pi)
   return np.matmul(X , axangle2mat(axis,angle))
 
-# Permutation - randomly perturb the temporal location of within-window events. 
-# To perturb the location of the data in a single window, we first slice the data 
-# into N samelength segments, with N ranging from 1 to 5, and randomly permute 
-# the segments to create a new window
-def permutation(X, nPerm=4, minSegLength=10):
-  X_new = np.zeros(X.shape)
-  idx = np.random.permutation(nPerm)
-  bWhile = True
-  while bWhile == True:
-    segs = np.zeros(nPerm+1, dtype=int)
-    segs[1:-1] = np.sort(np.random.randint(minSegLength, X.shape[0]-minSegLength, nPerm-1))
-    segs[-1] = X.shape[0]
-    if np.min(segs[1:]-segs[0:-1]) > minSegLength:
-      bWhile = False
-  pp = 0
-  for ii in range(nPerm):
-    x_temp = X[segs[idx[ii]]:segs[idx[ii]+1],:]
-    X_new[pp:pp+len(x_temp),:] = x_temp
-    pp += len(x_temp)
-  return(X_new)
+# DO NOT USE Permutation for accelerometry data since it may mess up the sequential properties, frequency spectrum and transitions
+## Permutation - randomly perturb the temporal location of within-window events. 
+## To perturb the location of the data in a single window, we first slice the data 
+## into N samelength segments, with N ranging from 1 to 5, and randomly permute 
+## the segments to create a new window
+#def permutation(X, nPerm=4, minSegLength=10):
+#  X_new = np.zeros(X.shape)
+#  idx = np.random.permutation(nPerm)
+#  bWhile = True
+#  while bWhile == True:
+#    segs = np.zeros(nPerm+1, dtype=int)
+#    segs[1:-1] = np.sort(np.random.randint(minSegLength, X.shape[0]-minSegLength, nPerm-1))
+#    segs[-1] = X.shape[0]
+#    if np.min(segs[1:]-segs[0:-1]) > minSegLength:
+#      bWhile = False
+#  pp = 0
+#  for ii in range(nPerm):
+#    x_temp = X[segs[idx[ii]]:segs[idx[ii]+1],:]
+#    X_new[pp:pp+len(x_temp),:] = x_temp
+#    pp += len(x_temp)
+#  return(X_new)
 
 # Random sampling - randomly sample timesteps and interpolate data inbetween
 def rand_sample_timesteps(X, nSample=1000):
