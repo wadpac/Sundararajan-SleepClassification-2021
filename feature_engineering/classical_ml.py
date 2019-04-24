@@ -19,7 +19,6 @@ from sklearn.pipeline import Pipeline
 from imblearn.under_sampling import EditedNearestNeighbours
 from imblearn.over_sampling import SMOTE
 from imblearn.combine import SMOTEENN, SMOTETomek
-from imblearn.ensemble import BalancedRandomForestClassifier
 from imblearn.pipeline import Pipeline as ImbPipeline
 
 import matplotlib
