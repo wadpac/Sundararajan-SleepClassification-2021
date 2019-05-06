@@ -1,4 +1,5 @@
-rm(list=ls())
+# rm(list=ls())
+# Use epoch level data to calculate sleep classification  with heuristic method (van Hees 2015 PLOSONE)
 library(data.table)
 fname5 = "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_5.0s.csv"
 fname30 = "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_30.0s.csv"
