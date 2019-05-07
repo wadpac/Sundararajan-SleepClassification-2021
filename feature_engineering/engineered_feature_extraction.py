@@ -145,13 +145,13 @@ def main(argv):
         df = pd.DataFrame(data=data, columns=cols)
         
         # Uncomment for PSGNewcastle2015 data
-        user = fname.split('_')[0]
-        position = fname.split('_')[1]
-        dataset = 'Newcastle'        
+#        user = fname.split('_')[0]
+#        position = fname.split('_')[1]
+#        dataset = 'Newcastle'        
         # Uncomment for UPenn_Axivity data
-#        user = fname.split('.h5')[0][-4:]
-#        position = 'NaN'
-#        dataset = 'UPenn'
+        user = fname.split('.h5')[0][-4:]
+        position = 'NaN'
+        dataset = 'UPenn'
         
         df['user'] = user  
         df['position'] = position
