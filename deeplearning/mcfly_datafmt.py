@@ -98,13 +98,13 @@ def main(argv):
     
     # Save data, labels and other info to file    
     # Uncomment for PSGNewcastle2015 data
-    user = fname.split('_')[0]
-    position = fname.split('_')[1]
-    dataset = 'Newcastle'        
+#    user = fname.split('_')[0]
+#    position = fname.split('_')[1]
+#    dataset = 'Newcastle'        
     # Uncomment for UPenn_Axivity data
-#    user = fname.split('.h5')[0][-4:]
-#    position = 'NaN'
-#    dataset = 'UPenn'
+    user = fname.split('.h5')[0][-4:]
+    position = 'NaN'
+    dataset = 'UPenn'
         
     out_fname = fname.split('.h5')[0] + '.npz'
     np.savez(os.path.join(outdir,out_fname), data=data, labels=labels, user=user, position=position, dataset=dataset)
