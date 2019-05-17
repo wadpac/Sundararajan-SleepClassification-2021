@@ -2,16 +2,69 @@ import sys,os
 import numpy as np
 import pandas as pd
 import random
+from random import sample
 from mcfly import modelgen, find_architecture
 from keras.models import load_model
 from collections import Counter
 
 from sklearn.model_selection import GroupKFold, StratifiedKFold
+from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report, confusion_matrix
 
 from metrics import weighted_f1
 from data_augmentation import jitter, time_warp, rotation, rand_sampling
 
 np.random.seed(2)
+
+def get_classification_report(pred_list, sleep_states):
+  nfolds = len(pred_list)
+  precision = 0.0; recall = 0.0; fscore = 0.0; accuracy = 0.0
+  class_metrics = {}
+  for state in sleep_states:
+    class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0}
+  confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
+  for i in range(nfolds):
+    y_true = pred_list[i][0]
+    y_pred = pred_list[i][1]
+    prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred, average='macro')
+    acc = accuracy_score(y_true, y_pred)
+    precision += prec; recall += rec; fscore += fsc; accuracy += acc
+    fold_class_metrics = classification_report(y_true, y_pred, \
+                                          target_names=sleep_states, output_dict=True)
+    for state in sleep_states:
+      class_metrics[state]['precision'] += fold_class_metrics[state]['precision']
+      class_metrics[state]['recall'] += fold_class_metrics[state]['recall']
+      class_metrics[state]['f1-score'] += fold_class_metrics[state]['f1-score']
+
+    fold_conf_mat = confusion_matrix(y_true, y_pred).astype(np.float)
+    for idx,state in enumerate(sleep_states):
+      fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == idx]))
+    confusion_mat = confusion_mat + fold_conf_mat
+
+  precision = precision/nfolds; recall = recall/nfolds
+  fscore = fscore/nfolds; accuracy = accuracy/nfolds
+  print('\nPrecision = %0.4f' % (precision*100.0))
+  print('Recall = %0.4f' % (recall*100.0))
+  print('F-score = %0.4f' % (fscore*100.0))
+  print('Accuracy = %0.4f' % (accuracy*100.0))
+
+  # Classwise report
+  print('\nClass\t\tPrecision\tRecall\t\tF1-score')
+  for state in sleep_states:
+    class_metrics[state]['precision'] = class_metrics[state]['precision'] / nfolds
+    class_metrics[state]['recall'] = class_metrics[state]['recall'] / nfolds
+    class_metrics[state]['f1-score'] = class_metrics[state]['f1-score'] / nfolds
+    print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f' % (state, class_metrics[state]['precision'], \
+                      class_metrics[state]['recall'], class_metrics[state]['f1-score']))
+  print('\n')
+
+  # Confusion matrix
+  confusion_mat = confusion_mat / nfolds
+  print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\n')
+  for i in range(confusion_mat.shape[0]):
+    #print('%s\t%0.4f' % (sleep_states[i], confusion_mat[i,0]))
+    print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1], confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
+  print('\n')
+
 
 # augment data - aug_factor : factor by which majority class samples are augmented. 
 # Samples from all other classes will be augmented by same amount
@@ -117,6 +170,9 @@ def main(argv):
   X = all_data['data']
   y = all_data['labels']
   users = all_data['user']
+  dataset = all_data['dataset']
+  X = X[dataset == 'Newcastle']
+  y = y[dataset == 'Newcastle']
   num_classes = y.shape[1]
  
   # Shuffle data
@@ -137,6 +193,7 @@ def main(argv):
   outer_cv_splits = 5; inner_cv_splits = 3
   group_kfold = GroupKFold(n_splits=outer_cv_splits)
   fold = 0
+  predictions = []
   for train_indices, test_indices in group_kfold.split(X,y,users):
     fold += 1
     print('Evaluating fold %d' % fold)
@@ -153,20 +210,23 @@ def main(argv):
     models = []
     strat_kfold = StratifiedKFold(n_splits=inner_cv_splits, random_state=0, shuffle=False)
     for grp_train_indices, grp_test_indices in strat_kfold.split(out_X_train, out_lbl):
+      grp_train_indices = sample(list(grp_train_indices),len(grp_train_indices))
       in_X_train = out_X_train[grp_train_indices]; in_y_train = out_y_train[grp_train_indices]
+      grp_test_indices = sample(list(grp_test_indices),1000)
       in_X_test = out_X_train[grp_test_indices]; in_y_test = out_y_train[grp_test_indices]
+      #print(Counter(in_y_train[:1000].argmax(axis=1))); continue
     
       # Generate candidate architectures
       model = modelgen.generate_models(in_X_train.shape, \
                                     number_of_classes=num_classes, \
-                                    number_of_models=1, metrics=[weighted_f1])  
+                                    number_of_models=1, metrics=[macro_f1], model_type='CNN')  
 
       # Compare generated architectures on a subset of data for few epochs
       outfile = os.path.join(resultdir, 'model_comparison.json')
       hist, acc, loss = find_architecture.train_models_on_samples(in_X_train, \
                                  in_y_train, in_X_test, in_y_test, model, nr_epochs=5, \
-                                 subset_size=in_X_train.shape[0], verbose=True, \
-                                 outputfile=outfile, metric='weighted_f1')
+                                 subset_size=5000, verbose=True, batch_size=20, \
+                                 outputfile=outfile, metric='macro_f1')
       val_acc.append(acc[0])
       models.append(model[0])
 
@@ -178,13 +238,13 @@ def main(argv):
     print(best_model_type)
     print(best_params)
   
-    nr_epochs = 1
+    nr_epochs = 5
     ntrain = out_X_train.shape[0]; nval = ntrain//5
     val_idx = np.random.randint(ntrain, size=nval)
     train_idx = [i for i in range(out_X_train.shape[0]) if i not in val_idx]
     trainX = out_X_train[train_idx]; trainY = out_y_train[train_idx]
     valX = out_X_train[val_idx]; valY = out_y_train[val_idx]
-    history = best_model.fit(trainX, trainY, epochs=nr_epochs, \
+    history = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=20\
                              validation_data=(valX, valY))
     
     # Save model
@@ -194,11 +254,9 @@ def main(argv):
     probs = best_model.predict_proba(out_X_test, batch_size=1)
     y_pred = probs.argmax(axis=1)
     y_true = out_y_test.argmax(axis=1)
-    conf_mat = pd.crosstab(pd.Series(y_true), pd.Series(y_pred)) 
-    conf_mat.index = [sleep_states[idx] for idx in conf_mat.index]
-    conf_mat.columns = [sleep_states[idx] for idx in conf_mat.columns]
-    conf_mat.reindex(columns=[lbl for lbl in sleep_states], fill_value=0)
-    print(conf_mat)
+    predictions.append((y_true, y_pred))
+
+  get_classification_report(predictions, sleep_states)
 
 if __name__ == "__main__":
   main(sys.argv[1:])
