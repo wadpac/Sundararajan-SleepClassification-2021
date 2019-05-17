@@ -90,6 +90,7 @@ def main(argv):
     orig_cols = df.columns
     sleep_states = ['Wake','NREM 1','NREM 2','NREM 3','REM']
     df = df[df['label'].isin(sleep_states)].reset_index()
+    df = df[df['dataset'] == 'UPenn'].reset_index()
     df = df[orig_cols]
     print('... Number of data samples: %d' % len(df))
     ctr = Counter(df['label'])
