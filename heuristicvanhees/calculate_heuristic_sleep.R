@@ -1,11 +1,15 @@
 # rm(list=ls())
 # Use epoch level data to calculate sleep classification  with heuristic method (van Hees 2015 PLOSONE)
-library(data.table)
-fname5 = "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_5.0s.csv"
-fname30 = "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_30.0s.csv"
-outputfile5 =  "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_5.0s_heuristic.csv"
-outputfile30 =  "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_30.0s_heuristic.csv"
 
+library(data.table)
+#fname5 = "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_5.0s.csv"
+#fname30 = "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_30.0s.csv"
+#outputfile5 =  "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_5.0s_heuristic.csv"
+#outputfile30 =  "/media/sf_sharedfolder/LRAP_epochdata/sleep_data_30.0s_heuristic.csv"
+fname5 = "/research/actigraphy/data/sleep_data_5.0s.csv"
+fname30 = "/research/actigraphy/data/sleep_data_30.0s.csv"
+outputfile5 = "/research/actigraphy/data/sleep_data_5.0s_heuristic.csv"
+outputfile30 = "/research/actigraphy/data/sleep_data_30.0s_heuristic.csv"
 
 # parameters for sleep detection algorithm
 timethreshold = 5 # in minutes

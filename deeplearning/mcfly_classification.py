@@ -10,7 +10,7 @@ from collections import Counter
 from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report, confusion_matrix
 
-from metrics import macro_f1
+from metrics import weighted_f1
 from data_augmentation import jitter, time_warp, rotation, rand_sampling
 
 np.random.seed(2)
@@ -225,7 +225,7 @@ def main(argv):
       outfile = os.path.join(resultdir, 'model_comparison.json')
       hist, acc, loss = find_architecture.train_models_on_samples(in_X_train, \
                                  in_y_train, in_X_test, in_y_test, model, nr_epochs=5, \
-                                 subset_size=5000, verbose=True, \
+                                 subset_size=5000, verbose=True, batch_size=20, \
                                  outputfile=outfile, metric='macro_f1')
       val_acc.append(acc[0])
       models.append(model[0])
@@ -244,7 +244,7 @@ def main(argv):
     train_idx = [i for i in range(out_X_train.shape[0]) if i not in val_idx]
     trainX = out_X_train[train_idx]; trainY = out_y_train[train_idx]
     valX = out_X_train[val_idx]; valY = out_y_train[val_idx]
-    history = best_model.fit(trainX, trainY, epochs=nr_epochs, \
+    history = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=20\
                              validation_data=(valX, valY))
     
     # Save model
