@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import random
 from random import sample
+import tensorflow as tf
 from mcfly import modelgen, find_architecture
 from keras.models import load_model
 from collections import Counter
@@ -10,7 +11,7 @@ from collections import Counter
 from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report, confusion_matrix
 
-from metrics import weighted_f1
+from metrics import macro_f1
 from data_augmentation import jitter, time_warp, rotation, rand_sampling
 
 np.random.seed(2)
@@ -166,6 +167,11 @@ def main(argv):
   if not os.path.exists(resultdir):
     os.makedirs(resultdir)
 
+  # Allow growth for GPU
+  config = tf.ConfigProto()
+  config.gpu_options.allow_growth = True
+  session = tf.Session(config=config)
+
   all_data = np.load(infile)
   X = all_data['data']
   y = all_data['labels']
@@ -198,7 +204,7 @@ def main(argv):
     fold += 1
     print('Evaluating fold %d' % fold)
     out_X_train = X[train_indices]; out_y_train = y[train_indices]
-    naug_samp = augment(out_X_train, out_y_train, sleep_states, fold=fold, aug_factor=1.25)
+    naug_samp = augment(out_X_train, out_y_train, sleep_states, fold=fold, aug_factor=1.5)
     out_X_train = np.memmap('tmp/X_aug_fold'+str(fold)+'.np', dtype='float32', mode='r', \
                             shape=(naug_samp,out_X_train.shape[1],out_X_train.shape[2]))
     out_y_train = np.memmap('tmp/y_aug_fold'+str(fold)+'.np', dtype='int32', mode='r', shape=(naug_samp,out_y_train.shape[1]))
@@ -244,7 +250,7 @@ def main(argv):
     train_idx = [i for i in range(out_X_train.shape[0]) if i not in val_idx]
     trainX = out_X_train[train_idx]; trainY = out_y_train[train_idx]
     valX = out_X_train[val_idx]; valY = out_y_train[val_idx]
-    history = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=20\
+    history = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=20, \
                              validation_data=(valX, valY))
     
     # Save model
