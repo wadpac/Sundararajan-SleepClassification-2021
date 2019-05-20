@@ -63,6 +63,7 @@ def main(argv):
     orig_cols = df.columns
     sleep_states = ['Wake','NREM 1','NREM 2','NREM 3','REM']
     df = df[df['label'].isin(sleep_states)].reset_index()
+    df = df[df['dataset'] == 'UPenn'].reset_index()
     df = df[orig_cols]
     print('... Number of data samples: %d' % len(df))
     ctr = Counter(df['label'])
@@ -181,25 +182,25 @@ def main(argv):
             results['NREM 2']['precision'].append(fold_nrem2_prec); results['NREM 2']['recall'].append(fold_nrem2_rec)
             results['NREM 2']['fbeta'].append(fold_nrem2_fbeta) 
                         
-            # Plot graph importance
-            G = DiGraph(class_hierarchy)
-            G.add_edge('<ROOT>','Wake',weight=factor*fold_wake_fbeta)
-            G.add_edge('<ROOT>','Sleep',weight=factor*fold_sleep_fbeta)
-            G.add_edge('Sleep','REM',weight=factor*fold_rem_fbeta)
-            G.add_edge('Sleep','NREM',weight=factor*fold_nrem_fbeta)
-            G.add_edge('NREM','NREM 3',weight=factor*fold_nrem3_fbeta)
-            G.add_edge('NREM','Light',weight=factor*fold_light_fbeta)
-            G.add_edge('Light','NREM 1',weight=factor*fold_nrem1_fbeta)
-            G.add_edge('Light','NREM 2',weight=factor*fold_nrem2_fbeta)
-        
-            pos = graphviz_layout(G, prog='sfdp')
-    
-            edges = G.edges
-            weights = [wt for u,v,wt in G.edges.data('weight', default=1)]
-    
-            nx.draw(G, pos, edges=edges, width=weights, node_size=2000, with_labels=True)
-            
-            plt.savefig("plots/graph_fold"+str(out_fold)+".jpg")
+#            # Plot graph importance
+#            G = DiGraph(class_hierarchy)
+#            G.add_edge('<ROOT>','Wake',weight=factor*fold_wake_fbeta)
+#            G.add_edge('<ROOT>','Sleep',weight=factor*fold_sleep_fbeta)
+#            G.add_edge('Sleep','REM',weight=factor*fold_rem_fbeta)
+#            G.add_edge('Sleep','NREM',weight=factor*fold_nrem_fbeta)
+#            G.add_edge('NREM','NREM 3',weight=factor*fold_nrem3_fbeta)
+#            G.add_edge('NREM','Light',weight=factor*fold_light_fbeta)
+#            G.add_edge('Light','NREM 1',weight=factor*fold_nrem1_fbeta)
+#            G.add_edge('Light','NREM 2',weight=factor*fold_nrem2_fbeta)
+#        
+#            pos = graphviz_layout(G, prog='sfdp')
+#    
+#            edges = G.edges
+#            weights = [wt for u,v,wt in G.edges.data('weight', default=1)]
+#    
+#            nx.draw(G, pos, edges=edges, width=weights, node_size=2000, with_labels=True)
+#            
+#            plt.savefig("plots/graph_fold"+str(out_fold)+".jpg")
             
     get_classification_report(results)
 
