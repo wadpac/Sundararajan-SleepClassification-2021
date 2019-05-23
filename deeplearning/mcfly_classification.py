@@ -6,6 +6,7 @@ from random import sample
 import tensorflow as tf
 from mcfly import modelgen, find_architecture
 from keras.models import load_model
+import keras.backend as K
 from collections import Counter
 
 from sklearn.model_selection import GroupKFold, StratifiedKFold
@@ -155,6 +156,12 @@ def augment(X, y, sleep_states, fold, aug_factor=1.0, step_sz = 10000):
 
   return naug_samp
 
+def limit_mem():
+  K.get_session().close()
+  cfg = K.tf.ConfigProto()
+  cfg.gpu_options.allow_growth = True
+  K.set_session(K.tf.Session(config=cfg))
+
 def main(argv):
   infile = argv[0]
   outdir = argv[1]
@@ -167,18 +174,13 @@ def main(argv):
   if not os.path.exists(resultdir):
     os.makedirs(resultdir)
 
-  # Allow growth for GPU
-  config = tf.ConfigProto()
-  config.gpu_options.allow_growth = True
-  session = tf.Session(config=config)
-
   all_data = np.load(infile)
   X = all_data['data']
   y = all_data['labels']
   users = all_data['user']
   dataset = all_data['dataset']
-  X = X[dataset == 'Newcastle']
-  y = y[dataset == 'Newcastle']
+  X = X[dataset == 'UPenn']
+  y = y[dataset == 'UPenn']
   num_classes = y.shape[1]
  
   # Shuffle data
@@ -221,7 +223,8 @@ def main(argv):
       grp_test_indices = sample(list(grp_test_indices),1000)
       in_X_test = out_X_train[grp_test_indices]; in_y_test = out_y_train[grp_test_indices]
       #print(Counter(in_y_train[:1000].argmax(axis=1))); continue
-    
+   
+      limit_mem() 
       # Generate candidate architectures
       model = modelgen.generate_models(in_X_train.shape, \
                                     number_of_classes=num_classes, \
@@ -231,7 +234,7 @@ def main(argv):
       outfile = os.path.join(resultdir, 'model_comparison.json')
       hist, acc, loss = find_architecture.train_models_on_samples(in_X_train, \
                                  in_y_train, in_X_test, in_y_test, model, nr_epochs=5, \
-                                 subset_size=5000, verbose=True, batch_size=20, \
+                                 subset_size=5000, verbose=True, batch_size=50, \
                                  outputfile=outfile, metric='macro_f1')
       val_acc.append(acc[0])
       models.append(model[0])
@@ -250,7 +253,14 @@ def main(argv):
     train_idx = [i for i in range(out_X_train.shape[0]) if i not in val_idx]
     trainX = out_X_train[train_idx]; trainY = out_y_train[train_idx]
     valX = out_X_train[val_idx]; valY = out_y_train[val_idx]
-    history = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=20, \
+    
+    limit_mem()
+    best_model = modelgen.generate_CNN_model(trainX.shape, num_classes, filters=best_params['filters'], \
+                                    fc_hidden_nodes=best_params['fc_hidden_nodes'], \
+                                    learning_rate=best_params['learning_rate'], \
+                                    regularization_rate=best_params['regularization_rate'], \
+                                    metrics=[macro_f1])
+    history = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=50, \
                              validation_data=(valX, valY))
     
     # Save model
