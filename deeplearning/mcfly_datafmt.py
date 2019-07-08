@@ -41,7 +41,8 @@ def get_timeslices(timestamp, channel, time_interval):
 def main(argv):
   indir = argv[0]
   time_interval = float(argv[1])
-  outdir = argv[2]
+  dataset = argv[2]
+  outdir = argv[3]
  
   if not os.path.exists(outdir):
     os.makedirs(outdir)
@@ -70,6 +71,7 @@ def main(argv):
     label[label == 'N2'] = 'NREM 2'
     label[label == 'N3'] = 'NREM 3'
     label[label == 'R'] = 'REM'
+    label[label == 'Wakefulness'] = 'Wake'
           
     # Get data slices and dominant labels/nonwear for given time interval
     label_agg = get_dominant_categ(timestamp, label, time_interval)
@@ -97,18 +99,23 @@ def main(argv):
       labels[idx,sleep_states.index(lbl)] = 1
     
     # Save data, labels and other info to file    
-    # Uncomment for PSGNewcastle2015 data
-#    user = fname.split('_')[0]
-#    position = fname.split('_')[1]
-#    dataset = 'Newcastle'        
-    # Uncomment for UPenn_Axivity data
-    user = fname.split('.h5')[0][-4:]
-    position = 'NaN'
-    dataset = 'UPenn'
+    # PSGNewcastle2015 data
+    if dataset == 'Newcastle':
+        user = fname.split('_')[0]
+        position = fname.split('_')[1]
+        dataset = 'Newcastle'    
+    elif dataset == 'UPenn':
+        user = fname.split('.h5')[0][-4:]
+        position = 'NaN'
+        dataset = 'UPenn'
+    elif dataset == 'AMC':
+        user = '_'.join(part for part in fname.split('.h5')[0].split('_')[:2])
+        position = 'NaN'
+        dataset = 'AMC'
         
     out_fname = fname.split('.h5')[0] + '.npz'
     np.savez(os.path.join(outdir,out_fname), data=data, labels=labels, user=user, position=position, dataset=dataset)
-    print(data.shape)
+    print(user, data.shape)
 
 if __name__ == "__main__":
   main(sys.argv[1:])
