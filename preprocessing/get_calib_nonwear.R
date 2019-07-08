@@ -1,8 +1,8 @@
 library(GGIR)
 
-indir <- 'C:/Research/actigraphy/data/UPenn_Geneactiv/Axivity\ files/'
-outdir <- 'C:/Research/actigraphy/data/UPenn_Geneactiv/'
-fileType = '*.cwa'
+indir <- 'C:/Research/actigraphy/data/amc_new/amc_extracted/wrap/'
+outdir <- 'C:/Research/actigraphy/data/amc_new/'
+fileType = '*.bin'
 dir.create(outdir, showWarnings = FALSE)
 
 files <- list.files(path = indir, pattern=fileType)
