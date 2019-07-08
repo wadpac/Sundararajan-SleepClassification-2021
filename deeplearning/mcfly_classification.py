@@ -9,6 +9,7 @@ from keras.models import load_model
 import keras.backend as K
 from collections import Counter
 
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report, confusion_matrix
 
@@ -179,8 +180,8 @@ def main(argv):
   y = all_data['labels']
   users = all_data['user']
   dataset = all_data['dataset']
-  X = X[dataset == 'UPenn']
-  y = y[dataset == 'UPenn']
+  #X = X[dataset == 'UPenn']
+  #y = y[dataset == 'UPenn']
   num_classes = y.shape[1]
  
   # Shuffle data
@@ -213,6 +214,13 @@ def main(argv):
     out_X_test = X[test_indices]; out_y_test = y[test_indices]
     out_lbl = out_y_train.argmax(axis=1)
 
+    # Normalize data
+    scaler = StandardScaler()
+    train_nsamp, train_nseq, train_nch = out_X_train.shape
+    out_X_train = scaler.fit_transform(out_X_train.reshape(train_nsamp,-1)).reshape(train_nsamp, train_nseq, train_nch)
+    test_nsamp, test_nseq, test_nch = out_X_test.shape
+    out_X_test = scaler.transform(out_X_test.reshape(test_nsamp,-1)).reshape(test_nsamp, test_nseq, test_nch)
+
     # Inner CV
     val_acc = []
     models = []
@@ -228,7 +236,7 @@ def main(argv):
       # Generate candidate architectures
       model = modelgen.generate_models(in_X_train.shape, \
                                     number_of_classes=num_classes, \
-                                    number_of_models=1, metrics=[macro_f1], model_type='CNN')  
+                                    number_of_models=1, metrics=[macro_f1])#, model_type='CNN')  
 
       # Compare generated architectures on a subset of data for few epochs
       outfile = os.path.join(resultdir, 'model_comparison.json')
@@ -255,11 +263,19 @@ def main(argv):
     valX = out_X_train[val_idx]; valY = out_y_train[val_idx]
     
     limit_mem()
-    best_model = modelgen.generate_CNN_model(trainX.shape, num_classes, filters=best_params['filters'], \
-                                    fc_hidden_nodes=best_params['fc_hidden_nodes'], \
-                                    learning_rate=best_params['learning_rate'], \
-                                    regularization_rate=best_params['regularization_rate'], \
-                                    metrics=[macro_f1])
+    if best_model_type == 'CNN':
+      best_model = modelgen.generate_CNN_model(trainX.shape, num_classes, filters=best_params['filters'], \
+                                      fc_hidden_nodes=best_params['fc_hidden_nodes'], \
+                                      learning_rate=best_params['learning_rate'], \
+                                      regularization_rate=best_params['regularization_rate'], \
+                                      metrics=[macro_f1])
+    else:
+      best_model = modelgen.generate_DeepConvLSTM_model(trainX.shape, num_classes, filters=best_params['filters'], \
+                                      lstm_dims=best_params['lstm_dims'], \
+                                      learning_rate=best_params['learning_rate'], \
+                                      regularization_rate=best_params['regularization_rate'], \
+                                      metrics=[macro_f1])
+
     history = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=50, \
                              validation_data=(valX, valY))
     
