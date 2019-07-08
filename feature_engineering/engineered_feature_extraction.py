@@ -88,7 +88,8 @@ def get_dominant_categ(timestamp, categ, time_interval, default='NaN'):
 def main(argv):
     indir = argv[0]
     time_interval = float(argv[1]) # time interval of feature aggregation in seconds
-    outdir = argv[2]
+    dataset = argv[2]
+    outdir = argv[3]
     
     if not os.path.exists(outdir):
         os.makedirs(outdir)
@@ -131,6 +132,7 @@ def main(argv):
         label[label == 'N2'] = 'NREM 2'
         label[label == 'N3'] = 'NREM 3'
         label[label == 'R'] = 'REM'
+        label[label == 'Wakefulness'] = 'Wake'
         label_agg = get_dominant_categ(timestamp, label, time_interval)
           
         # Get valid features and labels
@@ -144,14 +146,18 @@ def main(argv):
                 'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy1','LIDS_entropy2','LIDS_prevdiff','LIDS_nextdiff','label']
         df = pd.DataFrame(data=data, columns=cols)
         
-        # Uncomment for PSGNewcastle2015 data
-#        user = fname.split('_')[0]
-#        position = fname.split('_')[1]
-#        dataset = 'Newcastle'        
-        # Uncomment for UPenn_Axivity data
-        user = fname.split('.h5')[0][-4:]
-        position = 'NaN'
-        dataset = 'UPenn'
+        if dataset == 'Newcastle':
+            user = fname.split('_')[0]
+            position = fname.split('_')[1]
+            dataset = 'Newcastle'        
+        elif dataset == 'UPenn':
+            user = fname.split('.h5')[0][-4:]
+            position = 'NaN'
+            dataset = 'UPenn'
+        elif dataset == 'AMC':
+            user = '_'.join(part for part in fname.split('.h5')[0].split('_')[0:2])
+            position = 'NaN'
+            dataset = 'AMC'
         
         df['user'] = user  
         df['position'] = position
