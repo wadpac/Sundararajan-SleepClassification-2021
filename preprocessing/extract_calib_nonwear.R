@@ -1,8 +1,8 @@
 library(GGIR)
 
-indir <- 'C:/Research/actigraphy/data/UPenn_Geneactiv/output_Axivity\ files/meta/basic/'
-calibdir <- 'C:/Research/actigraphy/data/UPenn_Geneactiv/calib_param/'
-nonweardir <- 'C:/Research/actigraphy/data/UPenn_Geneactiv/nonwear/'
+indir <- 'C:/Research/actigraphy/data/amc_new/output_wrap/meta/basic/'
+calibdir <- 'C:/Research/actigraphy/data/amc_new/calib_param/'
+nonweardir <- 'C:/Research/actigraphy/data/amc_new/nonwear/'
 dir.create(calibdir, showWarnings = FALSE)
 dir.create(nonweardir, showWarnings = FALSE)
 
