@@ -113,7 +113,7 @@ def main(argv):
   
   graph = DiGraph(class_hierarchy)    
   
-  outer_cv_splits = 2; inner_cv_splits = 3
+  outer_cv_splits = 5; inner_cv_splits = 3
   factor = 10.0
   
   results = {'Wake': {'precision': [], 'recall': [], 'fbeta': []},
