@@ -1,12 +1,14 @@
 import sys,os
 import numpy as np
 import pandas as pd
+import h5py
 import random
 from random import sample
 import tensorflow as tf
 from mcfly import modelgen, find_architecture
 from keras.models import load_model
 import keras.backend as K
+from keras.callbacks import EarlyStopping, ModelCheckpoint
 from collections import Counter
 
 from sklearn.preprocessing import StandardScaler
@@ -15,8 +17,41 @@ from sklearn.metrics import precision_recall_fscore_support, accuracy_score, cla
 
 from metrics import macro_f1
 from data_augmentation import jitter, time_warp, rotation, rand_sampling
+import matplotlib.pyplot as plt
 
 np.random.seed(2)
+
+import tensorflow as tf
+import keras
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+keras.backend.set_session(tf.Session(config=config))
+
+class F1scoreHistory(keras.callbacks.Callback):
+  def on_train_begin(self, logs={}):
+    self.f1score = {'train':[], 'val':[]}
+    self.mean_f1score = {'train':[], 'val':[]}
+
+  def on_batch_end(self, batch, logs={}):
+    self.f1score['train'].append(logs.get('macro_f1'))
+    self.mean_f1score['train'].append(np.mean(self.f1score['train']))
+    #self.f1score['val'].append(logs.get('val_macro_f1'))
+    #self.mean_f1score['val'].append(np.mean(self.f1score['val'][-100:]))
+
+def save_user_report(pred_list, sleep_states, fname):
+  nfolds = len(pred_list)
+  for i in range(nfolds):
+    users = pred_list[i][0]
+    y_true = pred_list[i][1]
+    y_true = [sleep_states[idx] for idx in y_true]
+    y_pred = pred_list[i][2]
+    y_pred = [sleep_states[idx] for idx in y_pred]
+    fold = np.array([i+1]*len(users))
+    df = pd.DataFrame({'Fold':fold, 'Users':users, 'Y_true':y_true, 'Y_pred':y_pred})
+    if i != 0:
+      df.to_csv(fname, mode='a', header=False, index=False)
+    else:
+      df.to_csv(fname, mode='w', header=True, index=False)
 
 def get_classification_report(pred_list, sleep_states):
   nfolds = len(pred_list)
@@ -26,8 +61,8 @@ def get_classification_report(pred_list, sleep_states):
     class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0}
   confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
   for i in range(nfolds):
-    y_true = pred_list[i][0]
-    y_pred = pred_list[i][1]
+    y_true = pred_list[i][1]
+    y_pred = pred_list[i][2]
     prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred, average='macro')
     acc = accuracy_score(y_true, y_pred)
     precision += prec; recall += rec; fscore += fsc; accuracy += acc
@@ -62,12 +97,16 @@ def get_classification_report(pred_list, sleep_states):
 
   # Confusion matrix
   confusion_mat = confusion_mat / nfolds
-  print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\n')
-  for i in range(confusion_mat.shape[0]):
-    #print('%s\t%0.4f' % (sleep_states[i], confusion_mat[i,0]))
-    print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1], confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
-  print('\n')
-
+  if len(sleep_states) > 2:
+    print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\n')
+    for i in range(confusion_mat.shape[0]):
+      print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1], confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
+    print('\n')
+  else:
+    print('ConfMat\tWake\tSleep\n')
+    for i in range(confusion_mat.shape[0]):
+      print('%s\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1]))
+    print('\n')
 
 # augment data - aug_factor : factor by which majority class samples are augmented. 
 # Samples from all other classes will be augmented by same amount
@@ -95,17 +134,17 @@ def augment(X, y, sleep_states, fold, aug_factor=1.0, step_sz = 10000):
     lbl_y = y[y[:,idx] == 1,:]
     lbl_x = X[y[:,idx] == 1,:]
     st_idx = i*max_samp
-    end_idx = st_idx + lbl_x.shape[0]
-    X_aug[st_idx:end_idx,:,:] = lbl_x
-    y_aug[st_idx:end_idx,:] = lbl_y
 
     # Augment each class with random variations
     # Choose a random set of samples and apply a single variation 
     # Toss a coin and choose to apply another variation
     # Append new samples to augmented data
     n_aug = max_samp - ctr 
-    print('%s: Augmenting %d samples to %d samples' % (lbl,n_aug,ctr))
     if n_aug > 0:
+      print('%s: Augmenting %d samples to %d samples' % (lbl,n_aug,ctr))
+      end_idx = st_idx + lbl_x.shape[0]
+      X_aug[st_idx:end_idx,:,:] = lbl_x
+      y_aug[st_idx:end_idx,:] = lbl_y
       if n_aug <= lbl_x.shape[0]: # Few samples to be augmented
         rand_idx = np.random.randint(0,lbl_x.shape[0],n_aug)
         aug_x = random.choice(variant_func)(lbl_x[rand_idx])
@@ -140,6 +179,13 @@ def augment(X, y, sleep_states, fold, aug_factor=1.0, step_sz = 10000):
         end_idx = st_idx + aug_x.shape[0]
         X_aug[st_idx:end_idx,:,:] = aug_x
         y_aug[st_idx:end_idx,:] = aug_y
+    else:
+      print('%s: Choosing %d samples of %d samples' % (lbl,max_samp,ctr))
+      end_idx = st_idx + max_samp
+      rand_idx = np.random.randint(0,lbl_x.shape[0],max_samp)
+      X_aug[st_idx:end_idx,:,:] = lbl_x[rand_idx]
+      y_aug[st_idx:end_idx,:] = lbl_y[rand_idx]
+
 
   # Shuffle indices
   shuf_idx = np.arange(X_aug.shape[0])
@@ -165,19 +211,26 @@ def limit_mem():
 
 def main(argv):
   infile = argv[0]
-  outdir = argv[1]
+  mode = argv[1] # binary or multiclass
+  outdir = argv[2]
 
-  sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM']
+  if mode == 'multiclass':
+    sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM']
+  else:
+    sleep_states = ['Wake', 'Sleep']
+
   if not os.path.exists(outdir):
     os.makedirs(outdir)
 
-  resultdir = os.path.join(outdir,'models')
+  resultdir = os.path.join(outdir,mode,'models')
   if not os.path.exists(resultdir):
     os.makedirs(resultdir)
 
   all_data = np.load(infile)
   X = all_data['data']
   y = all_data['labels']
+  if mode == 'binary':
+    y = np.array([y[:,0], y[:,1:].any(axis=-1)]).T
   users = all_data['user']
   dataset = all_data['dataset']
   #X = X[dataset == 'UPenn']
@@ -196,10 +249,12 @@ def main(argv):
   #X = X[idx]; y = y[idx]; users = [users[i] for i in idx]
   y_lbl = y.argmax(axis=1)
   y_lbl = [sleep_states[i] for i in y_lbl]
+
+  early_stopping = EarlyStopping(monitor='val_macro_f1', mode='max', verbose=1, patience=2)
  
   # Use nested cross-validation based on users
   # Outer CV
-  outer_cv_splits = 5; inner_cv_splits = 3
+  outer_cv_splits = 5; inner_cv_splits = 5
   group_kfold = GroupKFold(n_splits=outer_cv_splits)
   fold = 0
   predictions = []
@@ -207,12 +262,13 @@ def main(argv):
     fold += 1
     print('Evaluating fold %d' % fold)
     out_X_train = X[train_indices]; out_y_train = y[train_indices]
-    naug_samp = augment(out_X_train, out_y_train, sleep_states, fold=fold, aug_factor=1.5)
+    naug_samp = augment(out_X_train, out_y_train, sleep_states, fold=fold, aug_factor=0.5)
     out_X_train = np.memmap('tmp/X_aug_fold'+str(fold)+'.np', dtype='float32', mode='r', \
                             shape=(naug_samp,out_X_train.shape[1],out_X_train.shape[2]))
     out_y_train = np.memmap('tmp/y_aug_fold'+str(fold)+'.np', dtype='int32', mode='r', shape=(naug_samp,out_y_train.shape[1]))
     out_X_test = X[test_indices]; out_y_test = y[test_indices]
     out_lbl = out_y_train.argmax(axis=1)
+    out_users = [users[k] for k in test_indices]
 
     # Normalize data
     scaler = StandardScaler()
@@ -228,7 +284,7 @@ def main(argv):
     for grp_train_indices, grp_test_indices in strat_kfold.split(out_X_train, out_lbl):
       grp_train_indices = sample(list(grp_train_indices),len(grp_train_indices))
       in_X_train = out_X_train[grp_train_indices]; in_y_train = out_y_train[grp_train_indices]
-      grp_test_indices = sample(list(grp_test_indices),1000)
+      grp_test_indices = sample(list(grp_test_indices),len(grp_test_indices)//3)
       in_X_test = out_X_train[grp_test_indices]; in_y_test = out_y_train[grp_test_indices]
       #print(Counter(in_y_train[:1000].argmax(axis=1))); continue
    
@@ -241,8 +297,8 @@ def main(argv):
       # Compare generated architectures on a subset of data for few epochs
       outfile = os.path.join(resultdir, 'model_comparison.json')
       hist, acc, loss = find_architecture.train_models_on_samples(in_X_train, \
-                                 in_y_train, in_X_test, in_y_test, model, nr_epochs=5, \
-                                 subset_size=5000, verbose=True, batch_size=50, \
+                                 in_y_train, in_X_test, in_y_test, model, nr_epochs=1, \
+                                 subset_size=len(grp_train_indices)//3, verbose=True, batch_size=50, \
                                  outputfile=outfile, metric='macro_f1')
       val_acc.append(acc[0])
       models.append(model[0])
@@ -255,7 +311,7 @@ def main(argv):
     print(best_model_type)
     print(best_params)
   
-    nr_epochs = 5
+    nr_epochs = 10
     ntrain = out_X_train.shape[0]; nval = ntrain//5
     val_idx = np.random.randint(ntrain, size=nval)
     train_idx = [i for i in range(out_X_train.shape[0]) if i not in val_idx]
@@ -276,19 +332,45 @@ def main(argv):
                                       regularization_rate=best_params['regularization_rate'], \
                                       metrics=[macro_f1])
 
-    history = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=50, \
-                             validation_data=(valX, valY))
+    # Use early stopping and model checkpoints to handle overfitting and save best model
+    model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(fold)+'.h5'), monitor='val_macro_f1',\
+                                                 mode='max', save_best_only=True)
+    history = F1scoreHistory()
+    hist = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=50, \
+                             validation_data=(valX, valY), callbacks=[early_stopping, model_checkpt, history])
+
+    # Plot training history
+    plt.Figure()
+    plt.plot(history.mean_f1score['train'])
+    #plt.plot(history.mean_f1score['val'])
+    plt.title('Model F1-score')
+    plt.ylabel('F1-score')
+    plt.xlabel('Batch')
+    #plt.legend(['Train', 'Test'], loc='upper left')
+    plt.savefig(os.path.join(resultdir,'Fold'+str(fold)+'_performance_curve.jpg'))
     
-    # Save model
-    best_model.save(os.path.join(resultdir,'best_model_fold'+str(fold)+'.h5'))
+#    # Save model
+#    best_model.save(os.path.join(resultdir,'best_model_fold'+str(fold)+'.h5'))
 
     # Predict probability on validation data
     probs = best_model.predict_proba(out_X_test, batch_size=1)
     y_pred = probs.argmax(axis=1)
     y_true = out_y_test.argmax(axis=1)
-    predictions.append((y_true, y_pred))
+    predictions.append((out_users, y_true, y_pred))
 
+    # Save user report
+    if mode == 'binary':
+      save_user_report(predictions, sleep_states, os.path.join(resultdir,'fold'+str(fold)+'_deeplearning_binary_results.csv'))
+    else:
+      save_user_report(predictions, sleep_states, os.path.join(resultdir,'fold'+str(fold)+'_deeplearning_multiclass_results.csv'))
+  
   get_classification_report(predictions, sleep_states)
+
+  # Save user report
+  if mode == 'binary':
+    save_user_report(predictions, sleep_states, os.path.join(resultdir,'deeplearning_binary_results.csv'))
+  else:
+    save_user_report(predictions, sleep_states, os.path.join(resultdir,'deeplearning_multiclass_results.csv'))
 
 if __name__ == "__main__":
   main(sys.argv[1:])
