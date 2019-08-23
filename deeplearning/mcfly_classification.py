@@ -14,6 +14,7 @@ from collections import Counter
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report, confusion_matrix
+from sklearn.utils import class_weight
 
 from metrics import macro_f1
 from data_augmentation import jitter, time_warp, rotation, rand_sampling
@@ -34,7 +35,7 @@ class F1scoreHistory(keras.callbacks.Callback):
 
   def on_batch_end(self, batch, logs={}):
     self.f1score['train'].append(logs.get('macro_f1'))
-    self.mean_f1score['train'].append(np.mean(self.f1score['train']))
+    self.mean_f1score['train'].append(np.mean(self.f1score['train'][-500:]))
     #self.f1score['val'].append(logs.get('val_macro_f1'))
     #self.mean_f1score['val'].append(np.mean(self.f1score['val'][-100:]))
 
@@ -262,7 +263,9 @@ def main(argv):
     fold += 1
     print('Evaluating fold %d' % fold)
     out_X_train = X[train_indices]; out_y_train = y[train_indices]
-    naug_samp = augment(out_X_train, out_y_train, sleep_states, fold=fold, aug_factor=0.5)
+    out_lbl = out_y_train.argmax(axis=1)
+    out_class_wts = class_weight.compute_class_weight('balanced', np.unique(out_lbl), out_lbl) # Compute class weights before augmentation
+    naug_samp = augment(out_X_train, out_y_train, sleep_states, fold=fold, aug_factor=1.25)
     out_X_train = np.memmap('tmp/X_aug_fold'+str(fold)+'.np', dtype='float32', mode='r', \
                             shape=(naug_samp,out_X_train.shape[1],out_X_train.shape[2]))
     out_y_train = np.memmap('tmp/y_aug_fold'+str(fold)+'.np', dtype='int32', mode='r', shape=(naug_samp,out_y_train.shape[1]))
@@ -297,7 +300,7 @@ def main(argv):
       # Compare generated architectures on a subset of data for few epochs
       outfile = os.path.join(resultdir, 'model_comparison.json')
       hist, acc, loss = find_architecture.train_models_on_samples(in_X_train, \
-                                 in_y_train, in_X_test, in_y_test, model, nr_epochs=1, \
+                                 in_y_train, in_X_test, in_y_test, model, nr_epochs=1, class_weight=out_class_wts, \
                                  subset_size=len(grp_train_indices)//3, verbose=True, batch_size=50, \
                                  outputfile=outfile, metric='macro_f1')
       val_acc.append(acc[0])
@@ -337,7 +340,7 @@ def main(argv):
                                                  mode='max', save_best_only=True)
     history = F1scoreHistory()
     hist = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=50, \
-                             validation_data=(valX, valY), callbacks=[early_stopping, model_checkpt, history])
+                             validation_data=(valX, valY), class_weight=out_class_wts, callbacks=[early_stopping, model_checkpt, history])
 
     # Plot training history
     plt.Figure()
@@ -348,6 +351,7 @@ def main(argv):
     plt.xlabel('Batch')
     #plt.legend(['Train', 'Test'], loc='upper left')
     plt.savefig(os.path.join(resultdir,'Fold'+str(fold)+'_performance_curve.jpg'))
+    plt.clf()
     
 #    # Save model
 #    best_model.save(os.path.join(resultdir,'best_model_fold'+str(fold)+'.h5'))
