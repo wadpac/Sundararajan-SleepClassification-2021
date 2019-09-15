@@ -47,7 +47,7 @@ def main(argv):
   if not os.path.exists(outdir):
     os.makedirs(outdir)
 
-  sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM']
+  sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM', 'Wake1']
 
   files = os.listdir(indir)
   for fname in files:
@@ -72,6 +72,7 @@ def main(argv):
     label[label == 'N3'] = 'NREM 3'
     label[label == 'R'] = 'REM'
     label[label == 'Wakefulness'] = 'Wake'
+    label[label == 'NaN'] = 'Wake1' # Possible wake scenario as long as it is not nonwear
           
     # Get data slices and dominant labels/nonwear for given time interval
     label_agg = get_dominant_categ(timestamp, label, time_interval)
