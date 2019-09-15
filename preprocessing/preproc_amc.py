@@ -32,7 +32,7 @@ def nonwear_bouts(pd_datetime, nonwear_df):
         st_idx = 0
     for idx in range(num_nonwear-1):
         if nonwear_df.loc[idx,'nonwear'] == False and nonwear_df.loc[idx+1,'nonwear'] == True:
-            st_idx = idx
+            st_idx = idx+1
         if nonwear_df.loc[idx,'nonwear'] == True and nonwear_df.loc[idx+1,'nonwear'] == False:
             end_idx = idx
             if end_idx >= st_idx and st_idx >= 0:
