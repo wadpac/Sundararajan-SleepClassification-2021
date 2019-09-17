@@ -17,7 +17,7 @@ from sklearn.metrics import precision_recall_fscore_support, accuracy_score, cla
 from sklearn.utils import class_weight
 
 from metrics import macro_f1
-from data_augmentation import jitter, time_warp, rotation, rand_sampling
+from data_augmentation import augment
 import matplotlib.pyplot as plt
 
 np.random.seed(2)
@@ -109,101 +109,6 @@ def get_classification_report(pred_list, sleep_states):
       print('%s\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1]))
     print('\n')
 
-# augment data - aug_factor : factor by which majority class samples are augmented. 
-# Samples from all other classes will be augmented by same amount
-def augment(X, y, sleep_states, fold, aug_factor=1.0, step_sz = 10000):
-  if not os.path.exists('tmp'):
-    os.makedirs('tmp')
-    
-  # List of possible variations
-  variant_func = [jitter, time_warp, rotation, rand_sampling]
-
-  y_lbl = y.argmax(axis=1)
-  y_lbl = [sleep_states[i] for i in y_lbl]
-  y_ctr = Counter(y_lbl).most_common()
-  print(y_ctr)
-
-  # Find max number of samples for each class
-  # Create memory mapped arrays to store data after augmentation
-  max_samp = int(y_ctr[0][1]*aug_factor) 
-  naug_samp = max_samp * len(sleep_states)
-  X_aug = np.memmap('tmp/X_aug_fold'+str(fold)+'.np', dtype='float32', mode='w+', shape=(naug_samp,X.shape[1],X.shape[2]))
-  y_aug = np.memmap('tmp/y_aug_fold'+str(fold)+'.np', dtype='int32', mode='w+', shape=(naug_samp,y.shape[1]))
-  for i,state in enumerate(y_ctr):
-    lbl,ctr = state
-    idx = sleep_states.index(lbl)
-    lbl_y = y[y[:,idx] == 1,:]
-    lbl_x = X[y[:,idx] == 1,:]
-    st_idx = i*max_samp
-
-    # Augment each class with random variations
-    # Choose a random set of samples and apply a single variation 
-    # Toss a coin and choose to apply another variation
-    # Append new samples to augmented data
-    n_aug = max_samp - ctr 
-    if n_aug > 0:
-      print('%s: Augmenting %d samples to %d samples' % (lbl,n_aug,ctr))
-      end_idx = st_idx + lbl_x.shape[0]
-      X_aug[st_idx:end_idx,:,:] = lbl_x
-      y_aug[st_idx:end_idx,:] = lbl_y
-      if n_aug <= lbl_x.shape[0]: # Few samples to be augmented
-        rand_idx = np.random.randint(0,lbl_x.shape[0],n_aug)
-        aug_x = random.choice(variant_func)(lbl_x[rand_idx])
-        toss = random.choice([0,1])
-        if toss == 1:
-          aug_x = random.choice(variant_func)(aug_x)
-        st_idx = end_idx
-        end_idx = st_idx + aug_x.shape[0]
-        X_aug[st_idx:end_idx,:,:] = aug_x
-        aug_y = np.zeros((n_aug,len(sleep_states))); aug_y[:,idx] = 1
-        y_aug[st_idx:end_idx,:] = aug_y
-      else: # If more samples to be augmented, create variations in batches of step_sz
-        aug_x = None; aug_y = None
-        for j in range(0,n_aug,step_sz):
-          if j+step_sz < n_aug:
-              sz = step_sz
-          else:
-              sz = n_aug-j
-          rand_idx = np.random.randint(0,lbl_x.shape[0],sz)
-          x_var = random.choice(variant_func)(lbl_x[rand_idx])
-          toss = random.choice([0,1])
-          if toss == 1:
-            x_var = random.choice(variant_func)(x_var)
-          y_var = np.zeros((sz,len(sleep_states))); y_var[:,idx] = 1
-          if aug_x is not None:
-            aug_x = np.vstack((aug_x,x_var))
-            aug_y = np.vstack((aug_y,y_var))
-          else:
-            aug_x = x_var
-            aug_y = y_var
-        st_idx = end_idx
-        end_idx = st_idx + aug_x.shape[0]
-        X_aug[st_idx:end_idx,:,:] = aug_x
-        y_aug[st_idx:end_idx,:] = aug_y
-    else:
-      print('%s: Choosing %d samples of %d samples' % (lbl,max_samp,ctr))
-      end_idx = st_idx + max_samp
-      rand_idx = np.random.randint(0,lbl_x.shape[0],max_samp)
-      X_aug[st_idx:end_idx,:,:] = lbl_x[rand_idx]
-      y_aug[st_idx:end_idx,:] = lbl_y[rand_idx]
-
-
-  # Shuffle indices
-  shuf_idx = np.arange(X_aug.shape[0])
-  np.random.shuffle(shuf_idx)
-  X_aug = X_aug[shuf_idx]
-  y_aug = y_aug[shuf_idx]
-
-  y_lbl = y_aug.argmax(axis=1)
-  y_lbl = [sleep_states[i] for i in y_lbl]
-  y_ctr = Counter(y_lbl).most_common()
-  print(y_ctr)
-  
-  # Flush and close memmap objects
-  del(X_aug); del(y_aug)
-
-  return naug_samp
-
 def limit_mem():
   K.get_session().close()
   cfg = K.tf.ConfigProto()
@@ -216,9 +121,11 @@ def main(argv):
   outdir = argv[2]
 
   if mode == 'multiclass':
-    sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM']
+    sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM', 'Wake_ext']
   else:
-    sleep_states = ['Wake', 'Sleep']
+    sleep_states = ['Wake', 'Sleep', 'Wake_ext']
+
+  valid_sleep_states = [state for state in sleep_states if state != 'Wake_ext']
 
   if not os.path.exists(outdir):
     os.makedirs(outdir)
@@ -231,12 +138,12 @@ def main(argv):
   X = all_data['data']
   y = all_data['labels']
   if mode == 'binary':
-    y = np.array([y[:,0], y[:,1:].any(axis=-1)]).T
+    y = np.array([y[:,0], y[:,1:-1].any(axis=-1), y[:,-1]]).T # collapse all sleep stages to sleep
   users = all_data['user']
   dataset = all_data['dataset']
   #X = X[dataset == 'UPenn']
   #y = y[dataset == 'UPenn']
-  num_classes = y.shape[1]
+  num_classes = len(valid_sleep_states)
  
   # Shuffle data
   shuf_idx = np.arange(X.shape[0])
@@ -245,9 +152,6 @@ def main(argv):
   y = y[shuf_idx]
   users = [users[i] for i in shuf_idx]
 
-  # Get small subset
-  #idx = np.random.randint(X.shape[0],size=10000)
-  #X = X[idx]; y = y[idx]; users = [users[i] for i in idx]
   y_lbl = y.argmax(axis=1)
   y_lbl = [sleep_states[i] for i in y_lbl]
 
@@ -259,17 +163,25 @@ def main(argv):
   group_kfold = GroupKFold(n_splits=outer_cv_splits)
   fold = 0
   predictions = []
+  wake_idx = sleep_states.index('Wake')
+  wake_ext_idx = sleep_states.index('Wake_ext')
   for train_indices, test_indices in group_kfold.split(X,y,users):
     fold += 1
     print('Evaluating fold %d' % fold)
     out_X_train = X[train_indices]; out_y_train = y[train_indices]
     out_lbl = out_y_train.argmax(axis=1)
+    out_lbl = [lbl if lbl != wake_ext_idx else wake_idx for lbl in out_lbl] # merge wake and wake_ext for computing class weights
     out_class_wts = class_weight.compute_class_weight('balanced', np.unique(out_lbl), out_lbl) # Compute class weights before augmentation
-    naug_samp = augment(out_X_train, out_y_train, sleep_states, fold=fold, aug_factor=1.25)
-    out_X_train = np.memmap('tmp/X_aug_fold'+str(fold)+'.np', dtype='float32', mode='r', \
+    naug_samp = augment(out_X_train, out_y_train, sleep_states, aug_factor=1.05)
+    out_X_train = np.memmap('tmp/X_aug.np', dtype='float32', mode='r', \
                             shape=(naug_samp,out_X_train.shape[1],out_X_train.shape[2]))
-    out_y_train = np.memmap('tmp/y_aug_fold'+str(fold)+'.np', dtype='int32', mode='r', shape=(naug_samp,out_y_train.shape[1]))
+    out_y_train = np.memmap('tmp/y_aug.np', dtype='int32', mode='r', shape=(naug_samp,len(valid_sleep_states)))
+    
     out_X_test = X[test_indices]; out_y_test = y[test_indices]
+    # Discard test samples corresponding to Wake_ext
+    out_X_test = out_X_test[out_y_test[:,wake_ext_idx] == 0]
+    out_y_test = out_y_test[out_y_test[:,wake_ext_idx] == 0]
+    
     out_lbl = out_y_train.argmax(axis=1)
     out_users = [users[k] for k in test_indices]
 
@@ -301,7 +213,7 @@ def main(argv):
       outfile = os.path.join(resultdir, 'model_comparison.json')
       hist, acc, loss = find_architecture.train_models_on_samples(in_X_train, \
                                  in_y_train, in_X_test, in_y_test, model, nr_epochs=1, class_weight=out_class_wts, \
-                                 subset_size=len(grp_train_indices)//3, verbose=True, batch_size=50, \
+                                 subset_size=len(grp_train_indices)//10, verbose=True, batch_size=50, \
                                  outputfile=outfile, metric='macro_f1')
       val_acc.append(acc[0])
       models.append(model[0])
@@ -364,17 +276,17 @@ def main(argv):
 
     # Save user report
     if mode == 'binary':
-      save_user_report(predictions, sleep_states, os.path.join(resultdir,'fold'+str(fold)+'_deeplearning_binary_results.csv'))
+      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(fold)+'_deeplearning_binary_results.csv'))
     else:
-      save_user_report(predictions, sleep_states, os.path.join(resultdir,'fold'+str(fold)+'_deeplearning_multiclass_results.csv'))
+      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(fold)+'_deeplearning_multiclass_results.csv'))
   
-  get_classification_report(predictions, sleep_states)
+  get_classification_report(predictions, valid_sleep_states)
 
   # Save user report
   if mode == 'binary':
-    save_user_report(predictions, sleep_states, os.path.join(resultdir,'deeplearning_binary_results.csv'))
+    save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'deeplearning_binary_results.csv'))
   else:
-    save_user_report(predictions, sleep_states, os.path.join(resultdir,'deeplearning_multiclass_results.csv'))
+    save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'deeplearning_multiclass_results.csv'))
 
 if __name__ == "__main__":
   main(sys.argv[1:])
