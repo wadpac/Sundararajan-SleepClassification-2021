@@ -13,6 +13,14 @@ def augment(X, y, sleep_states, aug_factor=1.0, step_sz = 10000):
   # List of possible variations
   variant_func = [jitter, time_warp, rotation, rand_sampling]
 
+  # Merge wake and extra_wake
+  wake_ext_idx = sleep_states.index('Wake_ext')
+  wake_idx = sleep_states.index('Wake')
+  y[y[:,wake_ext_idx] == 1,wake_idx] = 1
+  y = np.hstack((y[:,:wake_ext_idx], y[:,wake_ext_idx+1:-1]))
+  sleep_states = [state for state in sleep_states if state != 'Wake_ext']
+  print(sleep_states)
+
   y_lbl = y.argmax(axis=1)
   y_lbl = [sleep_states[i] for i in y_lbl]
   y_ctr = Counter(y_lbl).most_common()
