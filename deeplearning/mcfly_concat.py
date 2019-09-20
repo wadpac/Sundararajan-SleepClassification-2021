@@ -5,7 +5,10 @@ from scipy.interpolate import interp1d
 def main(argv):
   indir = argv[0]
   seqlen = int(argv[1]) # usually resampled frequency (30-40Hz) * time interval
-  outfile = argv[2]
+  outdir = argv[2]
+
+  if not os.path.exists(outdir):
+    os.makedirs(outdir)
 
   files = os.listdir(indir)
  
@@ -36,8 +39,23 @@ def main(argv):
     all_users.extend([user]*data.shape[0])
     all_dataset.extend([dataset]*data.shape[0])
 
+  # Write all data to file
   print(all_data.shape, all_labels.shape)
-  np.savez(outfile, data=all_data, labels=all_labels, user=all_users, dataset=all_dataset)
+  with open(os.path.join(outdir,'datasz.txt'),'w') as fp:
+    fp.write(str(all_data.shape)+'\n')
+    fp.write(str(all_labels.shape)+'\n')
+  data = np.memmap(os.path.join(outdir,'data.np'), mode='w+', dtype=np.float32, shape=all_data.shape)
+  data[:,:,:] = all_data
+  labels = np.memmap(os.path.join(outdir,'labels.np'), mode='w+', dtype=np.float32, shape=all_labels.shape)
+  labels[:,:] = all_labels
+  with open(os.path.join(outdir,'users.txt'),'w') as fp:
+    for user in all_users:
+      fp.write(user+'\n')
+  with open(os.path.join(outdir,'dataset.txt'),'w') as fp:
+    for dataset in all_dataset:
+      fp.write(dataset+'\n')
+
+  #np.savez(outfile, data=all_data, labels=all_labels, user=all_users, dataset=all_dataset)
 
 if __name__ == "__main__":
   main(sys.argv[1:])
