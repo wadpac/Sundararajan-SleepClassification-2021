@@ -115,7 +115,7 @@ def main(argv):
         
     out_fname_path = fname.split('.h5')[0]
     for k in range(num_samples):
-      out_fname = out_fname_path + '_' + str(k) + '.np'
+      out_fname = out_fname_path + '_' + str(k)
       np.save(os.path.join(outdir,out_fname), data[k])
       lbl_fp.write('{}\t{}\t{}\n'.format(out_fname,label_valid[k],user))
 
