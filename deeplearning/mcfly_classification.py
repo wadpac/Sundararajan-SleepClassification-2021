@@ -17,7 +17,7 @@ from sklearn.metrics import precision_recall_fscore_support, accuracy_score, cla
 from sklearn.utils import class_weight
 
 from metrics import macro_f1
-from data_augmentation import augment
+from data_augmentation import augment, load_as_memmap
 import matplotlib.pyplot as plt
 
 np.random.seed(2)
@@ -27,6 +27,8 @@ import keras
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 keras.backend.set_session(tf.Session(config=config))
+
+import gc
 
 class F1scoreHistory(keras.callbacks.Callback):
   def on_train_begin(self, logs={}):
@@ -116,7 +118,7 @@ def limit_mem():
   K.set_session(K.tf.Session(config=cfg))
 
 def main(argv):
-  infile = argv[0]
+  indir = argv[0]
   mode = argv[1] # binary or multiclass
   outdir = argv[2]
 
@@ -134,13 +136,25 @@ def main(argv):
   if not os.path.exists(resultdir):
     os.makedirs(resultdir)
 
-  all_data = np.load(infile)
-  X = all_data['data']
-  y = all_data['labels']
+  # Read data from disk
+  with open(os.path.join(indir,'datasz.txt'),'r') as fp:
+    sizes = fp.readlines()
+  sizes = [line.strip().replace('(','').replace(')','').split(',') for line in sizes]
+  X_shape = tuple(int(dim) for dim in sizes[0])
+  y_shape = tuple(int(dim) for dim in sizes[1])
+
+  print('Loading data from disk')
+  X = np.memmap(os.path.join(indir,'data.np'), mode='r', shape=X_shape, dtype=np.float32)
+  y = np.memmap(os.path.join(indir,'labels.np'), mode='r', shape=y_shape, dtype=np.float32)
   if mode == 'binary':
-    y = np.array([y[:,0], y[:,1:-1].any(axis=-1), y[:,-1]]).T # collapse all sleep stages to sleep
-  users = all_data['user']
-  dataset = all_data['dataset']
+    y_bin = np.array([y[:,0], y[:,1:-1].any(axis=-1), y[:,-1]], dtype=np.int32).T # collapse all sleep stages to sleep
+    y = load_as_memmap('tmp/y_bin.np', shape=y_bin.shape, dtype=np.int32, val=y_bin)
+  with open(os.path.join(indir,'users.txt')) as fp:
+      users = fp.readlines()
+  users = [line.strip() for line in users]
+  with open(os.path.join(indir,'dataset.txt')) as fp:
+      dataset = fp.readlines()
+  dataset = [line.strip() for line in dataset]
   #X = X[dataset == 'UPenn']
   #y = y[dataset == 'UPenn']
   num_classes = len(valid_sleep_states)
@@ -148,12 +162,10 @@ def main(argv):
   # Shuffle data
   shuf_idx = np.arange(X.shape[0])
   np.random.shuffle(shuf_idx)
+  print('Completed loading data')
   X = X[shuf_idx]
   y = y[shuf_idx]
   users = [users[i] for i in shuf_idx]
-
-  y_lbl = y.argmax(axis=1)
-  y_lbl = [sleep_states[i] for i in y_lbl]
 
   early_stopping = EarlyStopping(monitor='val_macro_f1', mode='max', verbose=1, patience=2)
  
@@ -168,39 +180,50 @@ def main(argv):
   for train_indices, test_indices in group_kfold.split(X,y,users):
     fold += 1
     print('Evaluating fold %d' % fold)
-    out_X_train = X[train_indices]; out_y_train = y[train_indices]
+    out_X_train = load_as_memmap('tmp/out_X_train.np', shape=(len(train_indices),X.shape[1],X.shape[2]), dtype=np.float32, val=X[train_indices])
+    out_y_train = load_as_memmap('tmp/out_y_train.np', shape=(len(train_indices),y.shape[1]), dtype=np.int32, val=y[train_indices])
     out_lbl = out_y_train.argmax(axis=1)
     out_lbl = [lbl if lbl != wake_ext_idx else wake_idx for lbl in out_lbl] # merge wake and wake_ext for computing class weights
     out_class_wts = class_weight.compute_class_weight('balanced', np.unique(out_lbl), out_lbl) # Compute class weights before augmentation
-    naug_samp = augment(out_X_train, out_y_train, sleep_states, aug_factor=1.05)
-    out_X_train = np.memmap('tmp/X_aug.np', dtype='float32', mode='r', \
+    naug_samp = augment(out_X_train, out_y_train, sleep_states, aug_factor=0.75)
+    out_X_train = np.memmap('tmp/X_aug.np', dtype='float32', mode='r+', \
                             shape=(naug_samp,out_X_train.shape[1],out_X_train.shape[2]))
-    out_y_train = np.memmap('tmp/y_aug.np', dtype='int32', mode='r', shape=(naug_samp,len(valid_sleep_states)))
-    
-    out_X_test = X[test_indices]; out_y_test = y[test_indices]
-    # Discard test samples corresponding to Wake_ext
-    out_X_test = out_X_test[out_y_test[:,wake_ext_idx] == 0]
-    out_y_test = out_y_test[out_y_test[:,wake_ext_idx] == 0]
-    
+    out_y_train = np.memmap('tmp/y_aug.np', dtype='int32', mode='r+', shape=(naug_samp,len(valid_sleep_states)))
     out_lbl = out_y_train.argmax(axis=1)
+   
+    out_X_test = X[test_indices]; out_y_test = y[test_indices]
     out_users = [users[k] for k in test_indices]
+    # Discard test samples corresponding to Wake_ext
+    valid_idx = np.arange(out_X_test.shape[0])[out_y_test[:,wake_ext_idx] == 0]
+    out_X_test = out_X_test[valid_idx]
+    out_X_test = load_as_memmap('tmp/out_X_test.np', shape=out_X_test.shape, dtype=np.float32, val=out_X_test)
+    out_y_test = out_y_test[valid_idx]
+    out_y_test = load_as_memmap('tmp/out_y_test.np', shape=out_y_test.shape, dtype=np.int32, val=out_y_test)
+    out_users = [out_users[k] for k in valid_idx]
 
     # Normalize data
     scaler = StandardScaler()
     train_nsamp, train_nseq, train_nch = out_X_train.shape
     out_X_train = scaler.fit_transform(out_X_train.reshape(train_nsamp,-1)).reshape(train_nsamp, train_nseq, train_nch)
+    out_X_train = load_as_memmap('tmp/out_X_train.np', shape=out_X_train.shape, dtype=np.float32, val=out_X_train)
     test_nsamp, test_nseq, test_nch = out_X_test.shape
     out_X_test = scaler.transform(out_X_test.reshape(test_nsamp,-1)).reshape(test_nsamp, test_nseq, test_nch)
+    out_X_test = load_as_memmap('tmp/out_X_test.np', shape=out_X_test.shape, dtype=np.float32, val=out_X_test)
 
     # Inner CV
     val_acc = []
     models = []
     strat_kfold = StratifiedKFold(n_splits=inner_cv_splits, random_state=0, shuffle=False)
+
     for grp_train_indices, grp_test_indices in strat_kfold.split(out_X_train, out_lbl):
-      grp_train_indices = sample(list(grp_train_indices),len(grp_train_indices))
+      grp_train_indices = sample(list(grp_train_indices),len(grp_train_indices)//10)
       in_X_train = out_X_train[grp_train_indices]; in_y_train = out_y_train[grp_train_indices]
-      grp_test_indices = sample(list(grp_test_indices),len(grp_test_indices)//3)
+      in_X_train = load_as_memmap('tmp/in_X_train.np', shape=in_X_train.shape, dtype=np.float32, val=in_X_train)
+      in_y_train = load_as_memmap('tmp/in_y_train.np', shape=in_y_train.shape, dtype=np.int32, val=in_y_train)
+      grp_test_indices = sample(list(grp_test_indices),len(grp_test_indices)//10)
       in_X_test = out_X_train[grp_test_indices]; in_y_test = out_y_train[grp_test_indices]
+      in_X_test = load_as_memmap('tmp/in_X_test.np', shape=in_X_test.shape, dtype=np.float32, val=in_X_test)
+      in_y_test = load_as_memmap('tmp/in_y_test.np', shape=in_y_test.shape, dtype=np.int32, val=in_y_test)
       #print(Counter(in_y_train[:1000].argmax(axis=1))); continue
    
       limit_mem() 
@@ -231,7 +254,11 @@ def main(argv):
     val_idx = np.random.randint(ntrain, size=nval)
     train_idx = [i for i in range(out_X_train.shape[0]) if i not in val_idx]
     trainX = out_X_train[train_idx]; trainY = out_y_train[train_idx]
+    trainX = load_as_memmap('tmp/trainX.np', shape=trainX.shape, dtype=np.float32, val=trainX)
+    trainY = load_as_memmap('tmp/trainY.np', shape=trainY.shape, dtype=np.int32, val=trainY)
     valX = out_X_train[val_idx]; valY = out_y_train[val_idx]
+    valX = load_as_memmap('tmp/valX.np', shape=valX.shape, dtype=np.float32, val=valX)
+    valY = load_as_memmap('tmp/valY.np', shape=valY.shape, dtype=np.int32, val=valY)
     
     limit_mem()
     if best_model_type == 'CNN':
@@ -252,21 +279,21 @@ def main(argv):
                                                  mode='max', save_best_only=True)
     history = F1scoreHistory()
     hist = best_model.fit(trainX, trainY, epochs=nr_epochs, batch_size=50, \
-                             validation_data=(valX, valY), class_weight=out_class_wts, callbacks=[early_stopping, model_checkpt, history])
+                             validation_data=(valX, valY), class_weight=out_class_wts, callbacks=[early_stopping, model_checkpt])
 
     # Plot training history
-    plt.Figure()
-    plt.plot(history.mean_f1score['train'])
-    #plt.plot(history.mean_f1score['val'])
-    plt.title('Model F1-score')
-    plt.ylabel('F1-score')
-    plt.xlabel('Batch')
-    #plt.legend(['Train', 'Test'], loc='upper left')
-    plt.savefig(os.path.join(resultdir,'Fold'+str(fold)+'_performance_curve.jpg'))
-    plt.clf()
-    
-#    # Save model
-#    best_model.save(os.path.join(resultdir,'best_model_fold'+str(fold)+'.h5'))
+#    plt.Figure()
+#    plt.plot(history.mean_f1score['train'])
+#    #plt.plot(history.mean_f1score['val'])
+#    plt.title('Model F1-score')
+#    plt.ylabel('F1-score')
+#    plt.xlabel('Batch')
+#    #plt.legend(['Train', 'Test'], loc='upper left')
+#    plt.savefig(os.path.join(resultdir,'Fold'+str(fold)+'_performance_curve.jpg'))
+#    plt.clf()
+#    
+##    # Save model
+##    best_model.save(os.path.join(resultdir,'best_model_fold'+str(fold)+'.h5'))
 
     # Predict probability on validation data
     probs = best_model.predict_proba(out_X_test, batch_size=1)
@@ -280,6 +307,9 @@ def main(argv):
     else:
       save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(fold)+'_deeplearning_multiclass_results.csv'))
   
+    # Flush and close memmap objects
+    del(out_X_train); del(out_y_train)
+
   get_classification_report(predictions, valid_sleep_states)
 
   # Save user report
