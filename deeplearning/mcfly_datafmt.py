@@ -49,6 +49,9 @@ def main(argv):
 
   sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM', 'Wake_ext']
 
+  lbl_fp = open(os.path.join(outdir,'labels.txt'),'w')
+  lbl_fp.write('filename\tlabels\tuser\n')
+
   files = os.listdir(indir)
   for fname in files:
     print('Processing ' + fname)
@@ -94,10 +97,6 @@ def main(argv):
     y_valid = y_valid.reshape((num_samples, num_timesteps, 1))
     z_valid = z_valid.reshape((num_samples, num_timesteps, 1))
     data = np.dstack((x_valid, y_valid, z_valid))
-    # Labels (num_samples x num_classes)
-    labels = np.zeros((num_samples, len(sleep_states)))
-    for idx,lbl in enumerate(label_valid):
-      labels[idx,sleep_states.index(lbl)] = 1
     
     # Save data, labels and other info to file    
     # PSGNewcastle2015 data
@@ -114,9 +113,13 @@ def main(argv):
         position = 'NaN'
         dataset = 'AMC'
         
-    out_fname = fname.split('.h5')[0] + '.npz'
-    np.savez(os.path.join(outdir,out_fname), data=data, labels=labels, user=user, position=position, dataset=dataset)
-    print(user, data.shape)
+    out_fname_path = fname.split('.h5')[0]
+    for k in range(num_samples):
+      out_fname = out_fname_path + '_' + str(k)
+      np.save(os.path.join(outdir,out_fname), data[k])
+      lbl_fp.write('{}\t{}\t{}\n'.format(out_fname,label_valid[k],user))
+
+  lbl_fp.close()
 
 if __name__ == "__main__":
   main(sys.argv[1:])
