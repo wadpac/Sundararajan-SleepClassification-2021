@@ -1,8 +1,15 @@
-import os
+import sys,os
 import random
 import numpy as np
 from collections import Counter
 from transforms import jitter, time_warp, rotation, rand_sampling
+
+def load_as_memmap(fname, shape, dtype, val):
+  var = np.memmap(fname, mode='w+', shape=shape, dtype=dtype)
+  var[:] = val
+  del(var)
+  var = np.memmap(fname, mode='r', shape=shape, dtype=dtype)
+  return var
 
 # augment data - aug_factor : factor by which majority class samples are augmented.
 # Samples from all other classes will be augmented by same amount
@@ -16,8 +23,9 @@ def augment(X, y, sleep_states, aug_factor=1.0, step_sz = 10000):
   # Merge wake and extra_wake
   wake_ext_idx = sleep_states.index('Wake_ext')
   wake_idx = sleep_states.index('Wake')
-  y[y[:,wake_ext_idx] == 1,wake_idx] = 1
-  y = np.hstack((y[:,:wake_ext_idx], y[:,wake_ext_idx+1:-1]))
+  y_bin = np.hstack((y[:,:wake_ext_idx], y[:,wake_ext_idx+1:-1]))
+  y_bin[y[:,wake_ext_idx] == 1,wake_idx] = 1
+  y = load_as_memmap('tmp/y_collapse.np', shape=y_bin.shape, dtype=np.int32, val=y_bin)
   sleep_states = [state for state in sleep_states if state != 'Wake_ext']
   print(sleep_states)
 
@@ -36,7 +44,9 @@ def augment(X, y, sleep_states, aug_factor=1.0, step_sz = 10000):
     lbl,ctr = state
     idx = sleep_states.index(lbl)
     lbl_y = y[y[:,idx] == 1,:]
+    lbl_y = load_as_memmap('tmp/lbl_y.np', shape=lbl_y.shape, dtype=np.int32, val=lbl_y)
     lbl_x = X[y[:,idx] == 1,:]
+    lbl_x = load_as_memmap('tmp/lbl_x.np', shape=lbl_x.shape, dtype=np.float32, val=lbl_x)
     st_idx = i*max_samp
 
     # Augment each class with random variations
