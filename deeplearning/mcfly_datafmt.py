@@ -84,11 +84,18 @@ def main(argv):
     y_slices = get_timeslices(timestamp, y, time_interval)
     z_slices = get_timeslices(timestamp, z, time_interval)
 
-    # Get only values corresponding to not nonwear and valid labels
-    x_valid = x_slices[(nonwear_agg == False) & (label_agg.isin(sleep_states))]
-    y_valid = y_slices[(nonwear_agg == False) & (label_agg.isin(sleep_states))]
-    z_valid = z_slices[(nonwear_agg == False) & (label_agg.isin(sleep_states))]
-    label_valid = label_agg[(nonwear_agg == False) & (label_agg.isin(sleep_states))]
+    # Get only values corresponding to valid labels
+    x_valid = x_slices[label_agg.isin(sleep_states)]
+    y_valid = y_slices[label_agg.isin(sleep_states)]
+    z_valid = z_slices[label_agg.isin(sleep_states)]
+    label_valid = label_agg[label_agg.isin(sleep_states)]
+    nonwear_valid = nonwear_agg[label_agg.isin(sleep_states)]
+
+    # Get only values where not nonwear outside of labeled instances
+    x_valid = x_valid[(nonwear_valid == False) | (label_valid != 'Wake_ext')]
+    y_valid = y_valid[(nonwear_valid == False) | (label_valid != 'Wake_ext')]
+    z_valid = z_valid[(nonwear_valid == False) | (label_valid != 'Wake_ext')]
+    label_valid = label_valid[(nonwear_valid == False) | (label_valid != 'Wake_ext')]
 
     # Reshape data and labels
     # Data (num_samples x num_timesteps x num_channels)
