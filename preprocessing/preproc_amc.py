@@ -49,6 +49,25 @@ def nonwear_bouts(pd_datetime, nonwear_df):
     
     return np_nonwear
 
+def estimate_nonwear(timestamp, x, y, z, interval='900', th=0.013):
+    df = pd.DataFrame(data={'timestamp':timestamp, 'x':x, 'y':y, 'z':z})
+    df.set_index('timestamp', inplace=True)
+    df_std = df.resample(str(interval)+'S').std()
+    is_nonwear = [(sum([row.x < th, row.y < th, row.z <th]) >=2) for index, row in df_std.iterrows()]
+    df_std['nonwear'] = is_nonwear
+    
+    nonwear_df = pd.DataFrame(data={'timestamp':timestamp})
+    nonwear_df['nonwear'] = False
+    intervals = list(df_std.index.values)
+    df_std = df_std.reset_index()
+    for index,ts in enumerate(intervals):
+        if index < len(intervals)-1:
+            nonwear_df.loc[(nonwear_df['timestamp'] >= intervals[index]) &\
+                         (nonwear_df['timestamp'] < intervals[index+1]),\
+                         'nonwear'] = df_std.iloc[index]['nonwear']
+    nonwear_df.loc[nonwear_df['timestamp'] >= intervals[-1], 'nonwear'] = df_std.iloc[-1]['nonwear']
+    return np.array(nonwear_df['nonwear'].values)
+  
 def get_sleep_states(lbl_data, pd_datetime, states):
     # Obtain bouts for each sleep state from label data
     num_lbl = len(lbl_data)
@@ -144,7 +163,8 @@ def preproc_amc(data_fname=None, lbl_fnames=None, calib_fname=None, \
     # Determine non-wear bouts
     print('... Determining nonwear bouts')
     nonwear_df = pd.read_csv(nonwear_fname, sep='\t')
-    np_nonwear = nonwear_bouts(timestamp, nonwear_df)
+    #np_nonwear = nonwear_bouts(timestamp, nonwear_df)
+    np_nonwear = estimate_nonwear(timestamp, cx, cy, cz)
     
     # Read label file
     # Get sleep states for each timestamp / align each timestamp with labels if available
