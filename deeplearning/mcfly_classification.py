@@ -24,11 +24,11 @@ np.random.seed(2)
 
 import tensorflow as tf
 import keras
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
-keras.backend.set_session(tf.Session(config=config))
+#config = tf.ConfigProto()
+#config.gpu_options.allow_growth = True
+#keras.backend.set_session(tf.Session(config=config))
 
-import gc
+from mcfly_datagenerator import DataGenerator
 
 class F1scoreHistory(keras.callbacks.Callback):
   def on_train_begin(self, logs={}):
@@ -111,11 +111,19 @@ def get_classification_report(pred_list, sleep_states):
       print('%s\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1]))
     print('\n')
 
-def limit_mem():
-  K.get_session().close()
-  cfg = K.tf.ConfigProto()
-  cfg.gpu_options.allow_growth = True
-  K.set_session(K.tf.Session(config=cfg))
+def get_partition(files, labels, users, sel_users, sleep_states, is_train=False):
+  wake_idx = sleep_states.index('Wake')
+  wake_ext_idx = sleep_states.index('Wake_ext')
+  labels = np.array([sleep_states.index(lbl) for lbl in labels])
+  if is_train: # use extra wake samples only for training
+    indices = np.array([i for i,user in enumerate(users) if (user in sel_users)])
+  else: 
+    indices = np.array([i for i,user in enumerate(users) if ((user in sel_users) and (labels[i] != wake_ext_idx))])
+  part_files = np.array(files)[indices]
+  part_labels = labels[indices]
+  if is_train: # relabel extra wake samples as wake for training
+    part_labels[part_labels == wake_ext_idx] = wake_idx
+  return part_files, part_labels
 
 def main(argv):
   indir = argv[0]
@@ -126,6 +134,7 @@ def main(argv):
     sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM', 'Wake_ext']
   else:
     sleep_states = ['Wake', 'Sleep', 'Wake_ext']
+    collate_sleep = ['NREM 1', 'NREM 2', 'NREM 3', 'REM']
 
   valid_sleep_states = [state for state in sleep_states if state != 'Wake_ext']
 
@@ -137,96 +146,73 @@ def main(argv):
     os.makedirs(resultdir)
 
   # Read data from disk
-  with open(os.path.join(indir,'datasz.txt'),'r') as fp:
-    sizes = fp.readlines()
-  sizes = [line.strip().replace('(','').replace(')','').split(',') for line in sizes]
-  X_shape = tuple(int(dim) for dim in sizes[0])
-  y_shape = tuple(int(dim) for dim in sizes[1])
-
-  print('Loading data from disk')
-  X = np.memmap(os.path.join(indir,'data.np'), mode='r', shape=X_shape, dtype=np.float32)
-  y = np.memmap(os.path.join(indir,'labels.np'), mode='r', shape=y_shape, dtype=np.float32)
+  data = pd.read_csv(os.path.join(indir,'labels.txt'), sep='\t')
+  files = []; labels = []; users = []
+  for idx, row in data.iterrows():
+    files.append(os.path.join(indir, row['filename']) + '.npy')
+    labels.append(row['labels'])
+    users.append(row['user'])
   if mode == 'binary':
-    y_bin = np.array([y[:,0], y[:,1:-1].any(axis=-1), y[:,-1]], dtype=np.int32).T # collapse all sleep stages to sleep
-    y = load_as_memmap('tmp/y_bin.np', shape=y_bin.shape, dtype=np.int32, val=y_bin)
-  with open(os.path.join(indir,'users.txt')) as fp:
-      users = fp.readlines()
-  users = [line.strip() for line in users]
-  with open(os.path.join(indir,'dataset.txt')) as fp:
-      dataset = fp.readlines()
-  dataset = [line.strip() for line in dataset]
-  #X = X[dataset == 'UPenn']
-  #y = y[dataset == 'UPenn']
-  num_classes = len(valid_sleep_states)
- 
-  # Shuffle data
-  shuf_idx = np.arange(X.shape[0])
-  np.random.shuffle(shuf_idx)
-  print('Completed loading data')
-  X = X[shuf_idx]
-  y = y[shuf_idx]
-  users = [users[i] for i in shuf_idx]
+    labels = ['Sleep' if lbl in collate_sleep else lbl for lbl in labels]
 
   early_stopping = EarlyStopping(monitor='val_macro_f1', mode='max', verbose=1, patience=2)
  
   # Use nested cross-validation based on users
   # Outer CV
+  unique_users = list(set(users))
+  random.shuffle(unique_users)
   outer_cv_splits = 5; inner_cv_splits = 5
-  group_kfold = GroupKFold(n_splits=outer_cv_splits)
-  fold = 0
+  out_fold_nusers = len(unique_users) // outer_cv_splits
+
   predictions = []
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
-  for train_indices, test_indices in group_kfold.split(X,y,users):
-    fold += 1
-    print('Evaluating fold %d' % fold)
-    out_X_train = load_as_memmap('tmp/out_X_train.np', shape=(len(train_indices),X.shape[1],X.shape[2]), dtype=np.float32, val=X[train_indices])
-    out_y_train = load_as_memmap('tmp/out_y_train.np', shape=(len(train_indices),y.shape[1]), dtype=np.int32, val=y[train_indices])
-    out_lbl = out_y_train.argmax(axis=1)
-    out_lbl = [lbl if lbl != wake_ext_idx else wake_idx for lbl in out_lbl] # merge wake and wake_ext for computing class weights
-    out_class_wts = class_weight.compute_class_weight('balanced', np.unique(out_lbl), out_lbl) # Compute class weights before augmentation
-    naug_samp = augment(out_X_train, out_y_train, sleep_states, aug_factor=0.75)
-    out_X_train = np.memmap('tmp/X_aug.np', dtype='float32', mode='r+', \
-                            shape=(naug_samp,out_X_train.shape[1],out_X_train.shape[2]))
-    out_y_train = np.memmap('tmp/y_aug.np', dtype='int32', mode='r+', shape=(naug_samp,len(valid_sleep_states)))
-    out_lbl = out_y_train.argmax(axis=1)
-   
-    out_X_test = X[test_indices]; out_y_test = y[test_indices]
-    out_users = [users[k] for k in test_indices]
-    # Discard test samples corresponding to Wake_ext
-    valid_idx = np.arange(out_X_test.shape[0])[out_y_test[:,wake_ext_idx] == 0]
-    out_X_test = out_X_test[valid_idx]
-    out_X_test = load_as_memmap('tmp/out_X_test.np', shape=out_X_test.shape, dtype=np.float32, val=out_X_test)
-    out_y_test = out_y_test[valid_idx]
-    out_y_test = load_as_memmap('tmp/out_y_test.np', shape=out_y_test.shape, dtype=np.int32, val=out_y_test)
-    out_users = [out_users[k] for k in valid_idx]
+  for out_fold in range(outer_cv_splits):
+    print('Evaluating fold %d' % (out_fold+1))
+    test_users = unique_users[out_fold*out_fold_nusers:(out_fold+1)*out_fold_nusers]
+    trainval_users = [user for user in unique_users if user not in test_users] 
+    train_users = trainval_users[:int(0.8*len(trainval_users))]
+    val_users = trainval_users[len(train_users):]
+    print(len(train_users), len(val_users), len(test_users))
 
-    # Normalize data
-    scaler = StandardScaler()
-    train_nsamp, train_nseq, train_nch = out_X_train.shape
-    out_X_train = scaler.fit_transform(out_X_train.reshape(train_nsamp,-1)).reshape(train_nsamp, train_nseq, train_nch)
-    out_X_train = load_as_memmap('tmp/out_X_train.np', shape=out_X_train.shape, dtype=np.float32, val=out_X_train)
-    test_nsamp, test_nseq, test_nch = out_X_test.shape
-    out_X_test = scaler.transform(out_X_test.reshape(test_nsamp,-1)).reshape(test_nsamp, test_nseq, test_nch)
-    out_X_test = load_as_memmap('tmp/out_X_test.np', shape=out_X_test.shape, dtype=np.float32, val=out_X_test)
+    train_fnames, train_labels = get_partition(files, labels, users, train_users, sleep_states, is_train=True)
+    val_fnames, val_labels = get_partition(files, labels, users, val_users, sleep_states)
+    test_fnames, test_labels = get_partition(files, labels, users, test_users, sleep_states)
+    
+    outer_train_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='outer_train',\
+                                    batch_size=32, seqlen=1500, n_channels=3, n_classes=len(valid_sleep_states),\
+                                    shuffle=True, augment=False, balance=True)
+    print('Fold {}: Computing mean and standard deviation'.format(out_fold+1))
+    #mean, std = outer_train_gen.fit()
+    mean = None; std = None
+    outer_val_gen = DataGenerator(val_fnames, val_labels, valid_sleep_states, partition='outer_val',\
+                                  batch_size=32, seqlen=1500, n_channels=3, n_classes=len(valid_sleep_states),\
+                                  mean=mean, std=std)
+    outer_test_gen = DataGenerator(test_fnames, test_labels, valid_sleep_states, partition='outer_test',\
+                                   batch_size=32, seqlen=1500, n_channels=3, n_classes=len(valid_sleep_states),\
+                                   mean=mean, std=std)
+
 
     # Inner CV
     val_acc = []
     models = []
-    strat_kfold = StratifiedKFold(n_splits=inner_cv_splits, random_state=0, shuffle=False)
-
-    for grp_train_indices, grp_test_indices in strat_kfold.split(out_X_train, out_lbl):
-      grp_train_indices = sample(list(grp_train_indices),len(grp_train_indices)//10)
-      in_X_train = out_X_train[grp_train_indices]; in_y_train = out_y_train[grp_train_indices]
-      in_X_train = load_as_memmap('tmp/in_X_train.np', shape=in_X_train.shape, dtype=np.float32, val=in_X_train)
-      in_y_train = load_as_memmap('tmp/in_y_train.np', shape=in_y_train.shape, dtype=np.int32, val=in_y_train)
-      grp_test_indices = sample(list(grp_test_indices),len(grp_test_indices)//10)
-      in_X_test = out_X_train[grp_test_indices]; in_y_test = out_y_train[grp_test_indices]
-      in_X_test = load_as_memmap('tmp/in_X_test.np', shape=in_X_test.shape, dtype=np.float32, val=in_X_test)
-      in_y_test = load_as_memmap('tmp/in_y_test.np', shape=in_y_test.shape, dtype=np.int32, val=in_y_test)
-      #print(Counter(in_y_train[:1000].argmax(axis=1))); continue
+    in_fold_nusers = len(trainval_users) // inner_cv_splits
+    for in_fold in range(inner_cv_splits):
+      in_val_users = trainval_users[in_fold*in_fold_nusers:(in_fold+1)*in_fold_nusers]
+      in_train_users = [user for user in trainval_users if user not in in_val_users] 
    
-      limit_mem() 
+      in_train_fnames, in_train_labels = get_partition(files, labels, users, in_train_users,\
+                                                       sleep_states, is_train=True)
+      in_val_fnames, in_val_labels = get_partition(files, labels, users, in_val_users, sleep_states)
+    
+      inner_train_gen = DataGenerator(in_train_fnames, in_train_labels, valid_sleep_states, partition='inner_train',\
+                                    batch_size=32, seqlen=1500, n_channels=3, n_classes=len(valid_sleep_states),\
+                                    shuffle=True, augment=False, balance=True, mean=mean, std=std)
+      inner_val_gen = DataGenerator(in_val_fnames, in_val_labels, valid_sleep_states, partition='inner_val',\
+                                  batch_size=32, seqlen=1500, n_channels=3, n_classes=len(valid_sleep_states),\
+                                  mean=mean, std=std)
+      
+      print(data.columns); exit()
       # Generate candidate architectures
       model = modelgen.generate_models(in_X_train.shape, \
                                     number_of_classes=num_classes, \
