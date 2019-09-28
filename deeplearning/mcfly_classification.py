@@ -24,9 +24,9 @@ np.random.seed(2)
 
 import tensorflow as tf
 import keras
-#config = tf.ConfigProto()
-#config.gpu_options.allow_growth = True
-#keras.backend.set_session(tf.Session(config=config))
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+keras.backend.set_session(tf.Session(config=config))
 
 from mcfly_datagenerator import DataGenerator
 
@@ -165,9 +165,9 @@ def main(argv):
   # Outer CV
   unique_users = list(set(users))
   random.shuffle(unique_users)
-  out_cv_splits = 5; in_cv_splits = 5
+  out_cv_splits = 5; in_cv_splits = 3
   out_fold_nusers = len(unique_users) // out_cv_splits
-  out_n_epochs = 10; in_n_epochs = 1
+  out_n_epochs = 1; in_n_epochs = 1
   predictions = []
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
@@ -184,15 +184,15 @@ def main(argv):
     
     out_train_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='out_train',\
                                     batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                                    n_classes=num_classes, shuffle=True, augment=False, balance=True)
+                                    n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True)
     print('Fold {}: Computing mean and standard deviation'.format(out_fold+1))
     #mean, std = out_train_gen.fit()
     mean = None; std = None
     out_val_gen = DataGenerator(val_fnames, val_labels, valid_sleep_states, partition='out_val',\
-                                  batch_size=1, seqlen=seqlen, n_channels=n_channels,\
+                                  batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
                                   n_classes=num_classes, mean=mean, std=std)
     out_test_gen = DataGenerator(test_fnames, test_labels, valid_sleep_states, partition='out_test',\
-                                   batch_size=1, seqlen=seqlen, n_channels=n_channels,\
+                                   batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
                                    n_classes=num_classes, mean=mean, std=std)
 
     # Get class weights
@@ -213,27 +213,26 @@ def main(argv):
     
       in_train_gen = DataGenerator(in_train_fnames, in_train_labels, valid_sleep_states, partition='in_train',\
                                     batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                                    n_classes=num_classes, shuffle=True, augment=False, balance=True, mean=mean, std=std)
+                                    n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True, mean=mean, std=std)
       in_val_gen = DataGenerator(in_val_fnames, in_val_labels, valid_sleep_states, partition='in_val',\
-                                  batch_size=1, seqlen=seqlen, n_channels=n_channels,\
+                                  batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
                                   n_classes=num_classes, mean=mean, std=std)
       
       # Generate candidate architectures
       model = modelgen.generate_models((None, seqlen, n_channels), \
                                     number_of_classes=num_classes, \
-                                    number_of_models=1, metrics=[macro_f1])#, model_type='CNN')  
+                                    number_of_models=1, metrics=[macro_f1])#, model_type='CNN') 
 
       # Compare generated architectures on a subset of data for few epochs
       outfile = os.path.join(resultdir, 'model_comparison.json')
       hist, acc, loss = find_architecture.train_models_on_samples(in_train_gen, in_val_gen,
-                                 model, nr_epochs=n_in_epochs, class_weight=out_class_wts, \
+                                 model, nr_epochs=in_n_epochs, n_steps=10, class_weight=out_class_wts, \
                                  verbose=True, outputfile=outfile, metric='macro_f1')
       val_acc.append(acc[0])
       models.append(model[0])
-      print(data.columns); exit()
 
     # Choose best model and evaluate values on validation data
-    print('Evaluating on best model for fold %d'% fold)
+    print('Evaluating on best model for fold %d'% out_fold)
     best_model_index = np.argmax(val_acc)
     best_model, best_params, best_model_type = models[best_model_index]
     print('Best model type and parameters:')
@@ -255,10 +254,10 @@ def main(argv):
                                       metrics=[macro_f1])
 
     # Use early stopping and model checkpoints to handle overfitting and save best model
-    model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(fold)+'.h5'), monitor='val_macro_f1',\
+    model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(out_fold+1)+'.h5'), monitor='val_macro_f1',\
                                                  mode='max', save_best_only=True)
     history = F1scoreHistory()
-    hist = best_model.fit_generator(out_train_gen, epochs=n_out_epochs, \
+    hist = best_model.fit_generator(out_train_gen, epochs=out_n_epochs, steps_per_epoch=10, \
                              validation_data=out_val_gen, class_weight=out_class_wts,\
                              callbacks=[early_stopping, model_checkpt])
 
@@ -278,15 +277,16 @@ def main(argv):
 
     # Predict probability on validation data
     probs = best_model.predict_generator(out_test_gen)
+    print(probs.shape)
     y_pred = probs.argmax(axis=1)
-    y_true = out_y_test.argmax(axis=1)
+    y_true = test_labels
     predictions.append((out_users, y_true, y_pred))
 
     # Save user report
     if mode == 'binary':
-      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(fold)+'_deeplearning_binary_results.csv'))
+      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(out_fold+1)+'_deeplearning_binary_results.csv'))
     else:
-      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(fold)+'_deeplearning_multiclass_results.csv'))
+      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(out_fold+1)+'_deeplearning_multiclass_results.csv'))
   
   get_classification_report(predictions, valid_sleep_states)
 
