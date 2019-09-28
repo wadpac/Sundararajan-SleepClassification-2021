@@ -28,13 +28,21 @@ class DataGenerator(keras.utils.Sequence):
 
   def __len__(self):
     'Denotes the number of batches per epoch'
-    return int(np.floor(len(self.filenames)*(1.0+self.aug_factor) / self.batch_size))
+    nbatches = int(len(self.filenames)*(1.0+self.aug_factor) // self.batch_size)
+    if (nbatches * self.batch_size) < (len(self.filenames) * (1.0+self.aug_factor)):
+      nbatches += 1
+    return nbatches
 
   def __getitem__(self, index):
     'Generate one batch of data'
     # Generate indices of the batch
     if self.balance == False: # For inference
-      indices = self.indices[index*self.batch_size:(index+1)*self.batch_size]
+      st_idx = index*self.batch_size
+      if (index+1)*self.batch_size <= (len(self.filenames)-1):
+        end_idx = (index+1)*self.batch_size
+      else:
+        end_idx = len(self.filenames)
+      indices = self.indices[st_idx:end_idx]
     else: # Balance each minibatch to have same number of classes
       # Get number of indices from each class
       if self.augment == True:
@@ -70,9 +78,9 @@ class DataGenerator(keras.utils.Sequence):
       y[i] = self.labels[idx]
 
     # Augment data
+    N = len(indices)
     if self.augment == True:
       # Choose a subset of samples to apply transformations for augmentation
-      N = len(indices)
       n_aug = self.batch_size - N
       aug_indices = np.random.choice(indices, n_aug)
       aug_x = np.empty((n_aug, self.seqlen, self.n_channels))
@@ -85,12 +93,14 @@ class DataGenerator(keras.utils.Sequence):
       if toss == 1:
         aug_x = random.choice(self.aug_func)(aug_x)
       X[N:,] = aug_x
+    else: # resize batch if less than batch size - usually last batch
+      X = X[:N]
+      y = y[:N]
 
     # Normalize data if mean and std are present
     if self.mean is not None and self.std is not None:
       X = (X - self.mean)/self.std
 
-    print(Counter(list(y)).most_common())
     return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
   
   def on_epoch_end(self):
