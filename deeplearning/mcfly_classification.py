@@ -121,9 +121,10 @@ def get_partition(files, labels, users, sel_users, sleep_states, is_train=False)
     indices = np.array([i for i,user in enumerate(users) if ((user in sel_users) and (labels[i] != wake_ext_idx))])
   part_files = np.array(files)[indices]
   part_labels = labels[indices]
+  part_users = [users[i] for i in indices]
   if is_train: # relabel extra wake samples as wake for training
     part_labels[part_labels == wake_ext_idx] = wake_idx
-  return part_files, part_labels
+  return part_files, part_labels, part_users
 
 def main(argv):
   indir = argv[0]
@@ -165,9 +166,9 @@ def main(argv):
   # Outer CV
   unique_users = list(set(users))
   random.shuffle(unique_users)
-  out_cv_splits = 5; in_cv_splits = 3
+  out_cv_splits = 5; in_cv_splits = 5
   out_fold_nusers = len(unique_users) // out_cv_splits
-  out_n_epochs = 1; in_n_epochs = 1
+  out_n_epochs = 10; in_n_epochs = 1
   predictions = []
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
@@ -178,26 +179,26 @@ def main(argv):
     train_users = trainval_users[:int(0.8*len(trainval_users))]
     val_users = trainval_users[len(train_users):]
 
-    train_fnames, train_labels = get_partition(files, labels, users, train_users, sleep_states, is_train=True)
-    val_fnames, val_labels = get_partition(files, labels, users, val_users, sleep_states)
-    test_fnames, test_labels = get_partition(files, labels, users, test_users, sleep_states)
+    out_train_fnames, out_train_labels, out_train_users = get_partition(files, labels, users, train_users,\
+                                                                        sleep_states, is_train=True)
+    out_val_fnames, out_val_labels, out_val_users = get_partition(files, labels, users, val_users, sleep_states)
+    out_test_fnames, out_test_labels, out_test_users = get_partition(files, labels, users, test_users, sleep_states)
     
-    out_train_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='out_train',\
+    out_train_gen = DataGenerator(out_train_fnames, out_train_labels, valid_sleep_states, partition='out_train',\
                                     batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
                                     n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True)
     print('Fold {}: Computing mean and standard deviation'.format(out_fold+1))
-    #mean, std = out_train_gen.fit()
-    mean = None; std = None
-    out_val_gen = DataGenerator(val_fnames, val_labels, valid_sleep_states, partition='out_val',\
+    mean, std = out_train_gen.fit()
+    #mean = None; std = None
+    out_val_gen = DataGenerator(out_val_fnames, out_val_labels, valid_sleep_states, partition='out_val',\
                                   batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
                                   n_classes=num_classes, mean=mean, std=std)
-    out_test_gen = DataGenerator(test_fnames, test_labels, valid_sleep_states, partition='out_test',\
+    out_test_gen = DataGenerator(out_test_fnames, out_test_labels, valid_sleep_states, partition='out_test',\
                                    batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
                                    n_classes=num_classes, mean=mean, std=std)
 
     # Get class weights
-    out_class_wts = class_weight.compute_class_weight('balanced', np.unique(train_labels), train_labels)
-    print(out_class_wts)
+    out_class_wts = class_weight.compute_class_weight('balanced', np.unique(out_train_labels), out_train_labels)
 
     # Inner CV
     val_acc = []
@@ -207,9 +208,9 @@ def main(argv):
       in_val_users = trainval_users[in_fold*in_fold_nusers:(in_fold+1)*in_fold_nusers]
       in_train_users = [user for user in trainval_users if user not in in_val_users] 
    
-      in_train_fnames, in_train_labels = get_partition(files, labels, users, in_train_users,\
+      in_train_fnames, in_train_labels, in_train_users = get_partition(files, labels, users, in_train_users,\
                                                        sleep_states, is_train=True)
-      in_val_fnames, in_val_labels = get_partition(files, labels, users, in_val_users, sleep_states)
+      in_val_fnames, in_val_labels, in_val_users = get_partition(files, labels, users, in_val_users, sleep_states)
     
       in_train_gen = DataGenerator(in_train_fnames, in_train_labels, valid_sleep_states, partition='in_train',\
                                     batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
@@ -226,7 +227,7 @@ def main(argv):
       # Compare generated architectures on a subset of data for few epochs
       outfile = os.path.join(resultdir, 'model_comparison.json')
       hist, acc, loss = find_architecture.train_models_on_samples(in_train_gen, in_val_gen,
-                                 model, nr_epochs=in_n_epochs, n_steps=10, class_weight=out_class_wts, \
+                                 model, nr_epochs=in_n_epochs, n_steps=1000, class_weight=out_class_wts, \
                                  verbose=True, outputfile=outfile, metric='macro_f1')
       val_acc.append(acc[0])
       models.append(model[0])
@@ -257,7 +258,7 @@ def main(argv):
     model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(out_fold+1)+'.h5'), monitor='val_macro_f1',\
                                                  mode='max', save_best_only=True)
     history = F1scoreHistory()
-    hist = best_model.fit_generator(out_train_gen, epochs=out_n_epochs, steps_per_epoch=10, \
+    hist = best_model.fit_generator(out_train_gen, epochs=out_n_epochs, \
                              validation_data=out_val_gen, class_weight=out_class_wts,\
                              callbacks=[early_stopping, model_checkpt])
 
@@ -277,10 +278,9 @@ def main(argv):
 
     # Predict probability on validation data
     probs = best_model.predict_generator(out_test_gen)
-    print(probs.shape)
     y_pred = probs.argmax(axis=1)
-    y_true = test_labels
-    predictions.append((out_users, y_true, y_pred))
+    y_true = out_test_labels
+    predictions.append((out_test_users, y_true, y_pred))
 
     # Save user report
     if mode == 'binary':
