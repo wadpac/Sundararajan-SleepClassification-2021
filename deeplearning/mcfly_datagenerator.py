@@ -3,10 +3,11 @@ import keras
 import random
 from tqdm import tqdm
 from transforms import jitter, time_warp, rotation, rand_sampling
+from collections import Counter
 
 class DataGenerator(keras.utils.Sequence):
   def __init__(self, filenames, labels, classes, partition=None, batch_size=32, seqlen=100, n_channels=3,
-               n_classes=5, mean=None, std=None, shuffle=False, augment=False, balance=False):
+               n_classes=5, mean=None, std=None, shuffle=False, augment=False, aug_factor=0.0, balance=False):
     'Initialization'
     self.partition = partition
     self.seqlen = seqlen
@@ -18,7 +19,7 @@ class DataGenerator(keras.utils.Sequence):
     self.n_classes = n_classes
     self.shuffle = shuffle
     self.augment = augment
-    self.aug_factor = 0.0
+    self.aug_factor = aug_factor
     self.aug_func = [jitter, time_warp, rotation, rand_sampling]
     self.balance = balance
     self.mean = mean
@@ -39,13 +40,13 @@ class DataGenerator(keras.utils.Sequence):
       if self.augment == True:
         assert self.aug_factor > 0.0
       aug_factor = 1.0 + self.aug_factor
-      cls_sz = (self.batch_size / aug_factor) // self.n_classes
+      cls_sz = int((self.batch_size / aug_factor) // self.n_classes)
       if cls_sz * aug_factor * self.n_classes < self.batch_size:
         cls_sz += 1
       # Generate indices with balanced classes
       indices = []
       all_indices = np.arange(len(self.filenames))
-      for cls in self.classes:
+      for cls in range(len(self.classes)):
         cls_idx = all_indices[self.labels == cls]
         indices.extend(np.random.choice(cls_idx,cls_sz))          
       # Choose batch sized indices
@@ -72,23 +73,24 @@ class DataGenerator(keras.utils.Sequence):
     if self.augment == True:
       # Choose a subset of samples to apply transformations for augmentation
       N = len(indices)
-      n_aug = self.batchsize - N
+      n_aug = self.batch_size - N
       aug_indices = np.random.choice(indices, n_aug)
       aug_x = np.empty((n_aug, self.seqlen, self.n_channels))
       for i,idx in enumerate(aug_indices):
         y[N+i] = self.labels[idx]
         aug_x[i,] = np.load(self.filenames[idx])
       # Apply one or two transformations to the chosen data
-      aug_x = random.choice(variant_func)(lbl_x[rand_idx])
+      aug_x = random.choice(self.aug_func)(aug_x)
       toss = random.choice([0,1])
       if toss == 1:
-        aug_x = random.choice(variant_func)(aug_x)
+        aug_x = random.choice(self.aug_func)(aug_x)
       X[N:,] = aug_x
 
     # Normalize data if mean and std are present
     if self.mean is not None and self.std is not None:
       X = (X - self.mean)/self.std
 
+    print(Counter(list(y)).most_common())
     return X, keras.utils.to_categorical(y, num_classes=self.n_classes)
   
   def on_epoch_end(self):
