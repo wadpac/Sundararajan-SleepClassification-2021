@@ -47,7 +47,7 @@ def main(argv):
   if not os.path.exists(outdir):
     os.makedirs(outdir)
 
-  sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM', 'Wake_ext']
+  sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM', 'Wake_ext', 'Nonwear']
 
   lbl_fp = open(os.path.join(outdir,'labels.txt'),'w')
   lbl_fp.write('filename\tlabels\tuser\n')
@@ -75,11 +75,13 @@ def main(argv):
     label[label == 'N3'] = 'NREM 3'
     label[label == 'R'] = 'REM'
     label[label == 'Wakefulness'] = 'Wake'
-    label[label == 'NaN'] = 'Wake_ext' # Possible wake scenario as long as it is not nonwear
+    # Assume unlabeled data as possible wake scenario as long as it is not nonwear
+    label[(~np.isin(label,sleep_states)) & (nonwear == False)] = 'Wake_ext'
+    # Add nonwear labels 
+    label[(~np.isin(label,sleep_states)) & (nonwear == True)] = 'Nonwear'
           
     # Get data slices and dominant labels/nonwear for given time interval
     label_agg = get_dominant_categ(timestamp, label, time_interval)
-    nonwear_agg = get_dominant_categ(timestamp, nonwear, time_interval)
     x_slices = get_timeslices(timestamp, x, time_interval)
     y_slices = get_timeslices(timestamp, y, time_interval)
     z_slices = get_timeslices(timestamp, z, time_interval)
@@ -89,13 +91,6 @@ def main(argv):
     y_valid = y_slices[label_agg.isin(sleep_states)]
     z_valid = z_slices[label_agg.isin(sleep_states)]
     label_valid = label_agg[label_agg.isin(sleep_states)]
-    nonwear_valid = nonwear_agg[label_agg.isin(sleep_states)]
-
-    # Get only values where not nonwear outside of labeled instances
-    x_valid = x_valid[(nonwear_valid == False) | (label_valid != 'Wake_ext')]
-    y_valid = y_valid[(nonwear_valid == False) | (label_valid != 'Wake_ext')]
-    z_valid = z_valid[(nonwear_valid == False) | (label_valid != 'Wake_ext')]
-    label_valid = label_valid[(nonwear_valid == False) | (label_valid != 'Wake_ext')]
 
     # Reshape data and labels
     # Data (num_samples x num_timesteps x num_channels)
