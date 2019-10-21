@@ -56,7 +56,7 @@ class DataGenerator(keras.utils.Sequence):
       all_indices = np.arange(len(self.filenames))
       for cls in range(len(self.classes)):
         cls_idx = all_indices[self.labels == cls]
-        indices.extend(np.random.choice(cls_idx,cls_sz))          
+        indices.extend(np.random.choice(cls_idx,cls_sz,replace=False))          
       # Choose batch sized indices
       random.shuffle(indices)
       indices = indices[:self.batch_size]
@@ -82,7 +82,7 @@ class DataGenerator(keras.utils.Sequence):
     if self.augment == True:
       # Choose a subset of samples to apply transformations for augmentation
       n_aug = self.batch_size - N
-      aug_indices = np.random.choice(indices, n_aug)
+      aug_indices = np.random.choice(indices, n_aug, replace=False)
       aug_x = np.empty((n_aug, self.seqlen, self.n_channels))
       for i,idx in enumerate(aug_indices):
         y[N+i] = self.labels[idx]
