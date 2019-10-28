@@ -5,10 +5,10 @@ import h5py
 import random
 from random import sample
 import tensorflow as tf
-from mcfly import modelgen, find_architecture
 from keras.models import load_model
 import keras.backend as K
 from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.optimizers import Adam
 from collections import Counter
 
 from sklearn.preprocessing import StandardScaler
@@ -28,7 +28,8 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 keras.backend.set_session(tf.Session(config=config))
 
-from mcfly_datagenerator import DataGenerator
+from FCN import FCN
+from datagenerator import DataGenerator
 
 class F1scoreHistory(keras.callbacks.Callback):
   def on_train_begin(self, logs={}):
@@ -56,7 +57,7 @@ def save_user_report(pred_list, sleep_states, fname):
     else:
       df.to_csv(fname, mode='w', header=True, index=False)
 
-def get_classification_report(pred_list, sleep_states):
+def get_classification_report(pred_list, mode, sleep_states):
   nfolds = len(pred_list)
   precision = 0.0; recall = 0.0; fscore = 0.0; accuracy = 0.0
   class_metrics = {}
@@ -100,21 +101,24 @@ def get_classification_report(pred_list, sleep_states):
 
   # Confusion matrix
   confusion_mat = confusion_mat / nfolds
-  if len(sleep_states) > 2:
+  if mode == 'multiclass':
     print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\n')
     for i in range(len(sleep_states)):
-      print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1], confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
+      print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0],\
+              confusion_mat[i][1], confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
     print('\n')
   else:
-    print('ConfMat\tWake\tSleep\n')
+    print('ConfMat\tWake\tSleep\tNonwear\n')
     for i in range(len(sleep_states)):
-      print('%s\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1]))
+      print('%s\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0],\
+              confusion_mat[i][1], confusion_mat[i][2]))
     print('\n')
 
 def get_partition(files, labels, users, sel_users, sleep_states, is_train=False):
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
   labels = np.array([sleep_states.index(lbl) for lbl in labels])
+  #is_train = False
   if is_train: # use extra wake samples only for training
     indices = np.array([i for i,user in enumerate(users) if (user in sel_users)])
   else: 
@@ -160,136 +164,94 @@ def main(argv):
   early_stopping = EarlyStopping(monitor='val_macro_f1', mode='max', verbose=1, patience=2)
 
   seqlen, n_channels = np.load(files[0]).shape
-  batch_size = 32
- 
+
+  # Hyperparameters
+  lr = 0.001 # learning rate
+  num_epochs = 30
+  batch_size = 64
+
   # Use nested cross-validation based on users
   # Outer CV
   unique_users = list(set(users))
   random.shuffle(unique_users)
-  out_cv_splits = 5; in_cv_splits = 5
-  out_fold_nusers = len(unique_users) // out_cv_splits
-  out_n_epochs = 10; in_n_epochs = 1
+  cv_splits = 5
+  fold_nusers = len(unique_users) // cv_splits
   predictions = []
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
-  for out_fold in range(out_cv_splits):
-    print('Evaluating fold %d' % (out_fold+1))
-    test_users = unique_users[out_fold*out_fold_nusers:(out_fold+1)*out_fold_nusers]
+  for fold in range(cv_splits):
+    print('Evaluating fold %d' % (fold+1))
+    test_users = unique_users[fold*fold_nusers:(fold+1)*fold_nusers]
     trainval_users = [user for user in unique_users if user not in test_users] 
     train_users = trainval_users[:int(0.8*len(trainval_users))]
     val_users = trainval_users[len(train_users):]
 
-    out_train_fnames, out_train_labels, out_train_users = get_partition(files, labels, users, train_users,\
+    # Create partitions
+    train_fnames, train_labels, train_users = get_partition(files, labels, users, train_users,\
                                                                         sleep_states, is_train=True)
-    out_val_fnames, out_val_labels, out_val_users = get_partition(files, labels, users, val_users, sleep_states)
-    out_test_fnames, out_test_labels, out_test_users = get_partition(files, labels, users, test_users, sleep_states)
+    val_fnames, val_labels, val_users = get_partition(files, labels, users, val_users, sleep_states)
+    test_fnames, test_labels, test_users = get_partition(files, labels, users, test_users, sleep_states)
+
+    # Create data generators 
+    train_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='train',\
+                              batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
+                              n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True)
     
-    out_train_gen = DataGenerator(out_train_fnames, out_train_labels, valid_sleep_states, partition='out_train',\
-                                    batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                                    n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True)
-    print('Fold {}: Computing mean and standard deviation'.format(out_fold+1))
-    mean, std = out_train_gen.fit()
-    #mean = None; std = None
-    out_val_gen = DataGenerator(out_val_fnames, out_val_labels, valid_sleep_states, partition='out_val',\
-                                  batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                                  n_classes=num_classes, mean=mean, std=std)
-    out_test_gen = DataGenerator(out_test_fnames, out_test_labels, valid_sleep_states, partition='out_test',\
-                                   batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                                   n_classes=num_classes, mean=mean, std=std)
+    #print('Fold {}: Computing mean and standard deviation'.format(fold+1))
+    #mean, std = train_gen.fit()
+    
+    # Use batchnorm as first step since compute mean and std 
+    # across entire dataset is time-consuming
+    mean = None; std = None 
+    val_gen = DataGenerator(val_fnames, val_labels, valid_sleep_states, partition='val',\
+                            batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
+                            n_classes=num_classes, mean=mean, std=std)
+    test_gen = DataGenerator(test_fnames, test_labels, valid_sleep_states, partition='test',\
+                             batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
+                             n_classes=num_classes, mean=mean, std=std)
 
     # Get class weights
-    out_class_wts = class_weight.compute_class_weight('balanced', np.unique(out_train_labels), out_train_labels)
+    class_wts = class_weight.compute_class_weight('balanced', np.unique(train_labels), train_labels)
+    print(class_wts)
 
-    # Inner CV
-    val_acc = []
-    models = []
-    in_fold_nusers = len(trainval_users) // in_cv_splits
-    for in_fold in range(in_cv_splits):
-      in_val_users = trainval_users[in_fold*in_fold_nusers:(in_fold+1)*in_fold_nusers]
-      in_train_users = [user for user in trainval_users if user not in in_val_users] 
-   
-      in_train_fnames, in_train_labels, in_train_users = get_partition(files, labels, users, in_train_users,\
-                                                       sleep_states, is_train=True)
-      in_val_fnames, in_val_labels, in_val_users = get_partition(files, labels, users, in_val_users, sleep_states)
+    # Create model
+    model = FCN(input_shape=(seqlen,n_channels), num_classes=len(valid_sleep_states))
+    model.compile(optimizer=Adam(lr=lr), loss='categorical_crossentropy', metrics=[macro_f1])
 
-      in_train_gen = DataGenerator(in_train_fnames, in_train_labels, valid_sleep_states, partition='in_train',\
-                                    batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                                    n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True,\
-                                    mean=mean, std=std)
-      in_val_gen = DataGenerator(in_val_fnames, in_val_labels, valid_sleep_states, partition='in_val',\
-                                  batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                                  n_classes=num_classes, mean=mean, std=std)
-      
-      # Generate candidate architectures
-      model = modelgen.generate_models((None, seqlen, n_channels), \
-                                    number_of_classes=num_classes, \
-                                    number_of_models=1, metrics=[macro_f1])#, model_type='CNN') 
-
-      # Compare generated architectures on a subset of data for few epochs
-      outfile = os.path.join(resultdir, 'model_comparison.json')
-      hist, acc, loss = find_architecture.train_models_on_samples(in_train_gen, in_val_gen,
-                                 model, nr_epochs=in_n_epochs, n_steps=1000, class_weight=out_class_wts, \
-                                 verbose=True, outputfile=outfile, metric='macro_f1')
-      val_acc.append(acc[0])
-      models.append(model[0])
-
-    # Choose best model and evaluate values on validation data
-    print('Evaluating on best model for fold %d'% out_fold)
-    best_model_index = np.argmax(val_acc)
-    best_model, best_params, best_model_type = models[best_model_index]
-    print('Best model type and parameters:')
-    print(best_model_type)
-    print(best_params)
-  
-    if best_model_type == 'CNN':
-      best_model = modelgen.generate_CNN_model((None, seqlen, n_channels), num_classes, filters=best_params['filters'], \
-                                      fc_hidden_nodes=best_params['fc_hidden_nodes'], \
-                                      learning_rate=best_params['learning_rate'], \
-                                      regularization_rate=best_params['regularization_rate'], \
-                                      metrics=[macro_f1])
-    else:
-      best_model = modelgen.generate_DeepConvLSTM_model((None, seqlen, n_channels), num_classes,\
-                                      filters=best_params['filters'], \
-                                      lstm_dims=best_params['lstm_dims'], \
-                                      learning_rate=best_params['learning_rate'], \
-                                      regularization_rate=best_params['regularization_rate'], \
-                                      metrics=[macro_f1])
-
+    # Train model
     # Use early stopping and model checkpoints to handle overfitting and save best model
-    model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(out_fold+1)+'.h5'), monitor='val_macro_f1',\
+    model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(fold+1)+'.h5'),\
+                                                 monitor='val_macro_f1',\
                                                  mode='max', save_best_only=True)
-    history = F1scoreHistory()
-    hist = best_model.fit_generator(out_train_gen, epochs=out_n_epochs, \
-                             validation_data=out_val_gen, class_weight=out_class_wts,\
-                             callbacks=[early_stopping, model_checkpt])
+    history = model.fit_generator(train_gen, epochs=num_epochs, validation_data=val_gen,
+                                  verbose=True, class_weight=class_wts, #steps_per_epoch=1000,
+                                  callbacks=[model_checkpt])#, workers=10, use_multiprocessing=True)
 
     # Plot training history
-#    plt.Figure()
-#    plt.plot(history.mean_f1score['train'])
-#    #plt.plot(history.mean_f1score['val'])
-#    plt.title('Model F1-score')
-#    plt.ylabel('F1-score')
-#    plt.xlabel('Batch')
-#    #plt.legend(['Train', 'Test'], loc='upper left')
-#    plt.savefig(os.path.join(resultdir,'Fold'+str(fold)+'_performance_curve.jpg'))
-#    plt.clf()
-#    
-##    # Save model
-##    best_model.save(os.path.join(resultdir,'best_model_fold'+str(fold)+'.h5'))
-
+    plt.Figure()
+    plt.plot(history.history['loss'], label='train')
+    plt.plot(history.history['val_loss'], label='val')
+    plt.title('Loss for fold {}'.format(fold))
+    plt.ylabel('Loss')
+    plt.xlabel('Epochs')
+    plt.legend(['Train', 'Test'], loc='upper right')
+    plt.savefig(os.path.join(resultdir,'Fold'+str(fold)+'_performance_curve.jpg'))
+    plt.clf()
+    
     # Predict probability on validation data
-    probs = best_model.predict_generator(out_test_gen)
+    probs = model.predict_generator(test_gen)
     y_pred = probs.argmax(axis=1)
-    y_true = out_test_labels
-    predictions.append((out_test_users, y_true, y_pred))
+    y_true = test_labels
+    predictions.append((test_users, y_true, y_pred))
 
     # Save user report
     if mode == 'binary':
-      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(out_fold+1)+'_deeplearning_binary_results.csv'))
+      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(fold+1)+'_deeplearning_binary_results.csv'))
     else:
-      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(out_fold+1)+'_deeplearning_multiclass_results.csv'))
+      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(fold+1)+'_deeplearning_multiclass_results.csv'))
+    get_classification_report(predictions, mode, valid_sleep_states)
   
-  get_classification_report(predictions, valid_sleep_states)
+  get_classification_report(predictions, mode, valid_sleep_states)
 
   # Save user report
   if mode == 'binary':

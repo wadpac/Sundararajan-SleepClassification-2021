@@ -25,6 +25,7 @@ class DataGenerator(keras.utils.Sequence):
     self.mean = mean
     self.std = std
     self.on_epoch_end()
+    self.selected = []
 
   def __len__(self):
     'Denotes the number of batches per epoch'
@@ -60,7 +61,7 @@ class DataGenerator(keras.utils.Sequence):
       # Choose batch sized indices
       random.shuffle(indices)
       indices = indices[:self.batch_size]
-
+      
     # Generate data
     X, y = self.__data_generation(indices)
 
@@ -69,8 +70,8 @@ class DataGenerator(keras.utils.Sequence):
   def __data_generation(self, indices):
     'Generates data containing batch_size samples' # X : (n_samples, *dim, n_channels)
     # Initialization
-    X = np.empty((self.batch_size, self.seqlen, self.n_channels))
-    y = np.empty((self.batch_size), dtype=int)
+    X = np.zeros((self.batch_size, self.seqlen, self.n_channels))
+    y = np.ones((self.batch_size), dtype=int) * -1
 
     # Generate data
     for i, idx in enumerate(indices):
@@ -82,8 +83,8 @@ class DataGenerator(keras.utils.Sequence):
     if self.augment == True:
       # Choose a subset of samples to apply transformations for augmentation
       n_aug = self.batch_size - N
-      aug_indices = np.random.choice(indices, n_aug, replace=False)
-      aug_x = np.empty((n_aug, self.seqlen, self.n_channels))
+      aug_indices = np.random.choice(indices, n_aug, replace=True)
+      aug_x = np.zeros((n_aug, self.seqlen, self.n_channels))
       for i,idx in enumerate(aug_indices):
         y[N+i] = self.labels[idx]
         aug_x[i,] = np.load(self.filenames[idx])
@@ -112,14 +113,17 @@ class DataGenerator(keras.utils.Sequence):
   def fit(self):
     'Get mean and std deviation for training data'
     assert 'train' in self.partition
-    mean = np.empty((self.seqlen, self.n_channels))
-    std = np.empty((self.seqlen, self.n_channels))
-    N = len(self.filenames)
+    
+    mean = np.zeros((self.seqlen, self.n_channels))
+    std = np.zeros((self.seqlen, self.n_channels))
+
+    N = len(self)
     for i in tqdm(range(N)):
-      mean += np.load(self.filenames[i])
-    self.mean = mean/N
+      X,y = self[i]
+      mean += X.sum(axis=0)
+    self.mean = mean/len(self.filenames)
     for i in tqdm(range(N)):
-      x = np.load(self.filenames[i])
-      std += (x - mean)**2
-    self.std = std/N
+      X,y = self[i]
+      std += ((X - mean)**2).sum(axis=0)
+    self.std = std/len(self.filenames)
     return self.mean, self.std
