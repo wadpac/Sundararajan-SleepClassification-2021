@@ -17,7 +17,7 @@ from sklearn.metrics import precision_recall_fscore_support, accuracy_score, cla
 from sklearn.utils import class_weight
 
 from metrics import macro_f1
-from data_augmentation import augment, load_as_memmap
+from losses import weighted_categorical_crossentropy
 import matplotlib.pyplot as plt
 
 np.random.seed(2)
@@ -188,14 +188,15 @@ def main(argv):
 
     # Create partitions
     train_fnames, train_labels, train_users = get_partition(files, labels, users, train_users,\
-                                                                        sleep_states, is_train=True)
+                                                            sleep_states, is_train=True)
     val_fnames, val_labels, val_users = get_partition(files, labels, users, val_users, sleep_states)
     test_fnames, test_labels, test_users = get_partition(files, labels, users, test_users, sleep_states)
 
     # Create data generators 
     train_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='train',\
                               batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                              n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True)
+                              n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75,\
+                              balance=True)
     
     #print('Fold {}: Computing mean and standard deviation'.format(fold+1))
     #mean, std = train_gen.fit()
@@ -216,7 +217,8 @@ def main(argv):
 
     # Create model
     model = FCN(input_shape=(seqlen,n_channels), num_classes=len(valid_sleep_states))
-    model.compile(optimizer=Adam(lr=lr), loss='categorical_crossentropy', metrics=[macro_f1])
+    model.compile(optimizer=Adam(lr=lr), loss=weighted_categorical_crossentropy(class_wts),
+                  metrics=[macro_f1])
 
     # Train model
     # Use early stopping and model checkpoints to handle overfitting and save best model
