@@ -31,12 +31,15 @@ def save_user_report(pred_list, sleep_states, fname):
   nfolds = len(pred_list)
   for i in range(nfolds):
     users = pred_list[i][0]
-    y_true = pred_list[i][1]
+    timestamp = pred_list[i][1]
+    y_true = pred_list[i][2]
     y_true = [sleep_states[idx] for idx in y_true]
-    y_pred = pred_list[i][2]
+    y_pred = pred_list[i][3]
     y_pred = [sleep_states[idx] for idx in y_pred]
+    fnames = pred_list[i][4]
     fold = np.array([i+1]*users.shape[0])
-    df = pd.DataFrame({'Fold':fold, 'Users':users, 'Y_true':y_true, 'Y_pred':y_pred})
+    df = pd.DataFrame({'Fold':fold, 'Users':users, 'Timestamp':timestamp,
+                       'Y_true':y_true, 'Y_pred':y_pred, 'Filenames':fnames})
     if i != 0:
       df.to_csv(fname, mode='a', header=False, index=False)  
     else:
@@ -50,8 +53,8 @@ def get_classification_report(pred_list, mode, sleep_states):
     class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0}
   confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
   for i in range(nfolds):
-    y_true = pred_list[i][1]
-    y_pred = pred_list[i][2]
+    y_true = pred_list[i][2]
+    y_pred = pred_list[i][3]
     prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred,
                                                           average='macro')
     acc = accuracy_score(y_true, y_pred)
@@ -127,7 +130,7 @@ def main(argv):
   df = df[df['label'].isin(sleep_states)].reset_index()
   # Collate sleep stages if in binary mode
   if mode == 'binary':
-    df[df['label'].isin(['REM','NREM 1','NREM 2','NREM 3']), 'label'] = 'Sleep'
+    df.loc[df['label'].isin(['REM','NREM 1','NREM 2','NREM 3']), 'label'] = 'Sleep'
     sleep_states = ['Wake','Sleep','Nonwear']
 
   print('... Number of data samples: %d' % len(df))
@@ -149,17 +152,19 @@ def main(argv):
 
   # Split data based on users, not on samples, for outer CV
   # Use Stratified CV for inner CV to ensure similar label distribution
+  ts = df['timestamp']
   X = df[feat_cols].values
   y = df['label']
   y = np.array([sleep_states.index(i) for i in y])
   groups = df['user']
+  fnames = df['filename']
 
   feat_len = X.shape[1]
 
   # Outer CV
   imbalanced_pred = []; imbalanced_imp = np.zeros(feat_len)
   balanced_pred = []; balanced_imp = np.zeros(feat_len)
-  outer_cv_splits = 5; inner_cv_splits = 3
+  outer_cv_splits = 5; inner_cv_splits = 5
   group_kfold = GroupKFold(n_splits=outer_cv_splits)
   out_fold = 0
   for train_indices, test_indices in group_kfold.split(X,y,groups):
@@ -167,6 +172,8 @@ def main(argv):
     out_fold_X_train = X[train_indices,:]; out_fold_X_test = X[test_indices,:]
     out_fold_y_train = y[train_indices]; out_fold_y_test = y[test_indices]
     out_fold_users_test = groups[test_indices]
+    out_fold_ts_test = ts[test_indices]
+    out_fold_fnames_test = fnames[test_indices]
 
     # Inner CV
     strat_kfold = StratifiedKFold(n_splits=inner_cv_splits, random_state=0,
@@ -192,8 +199,8 @@ def main(argv):
     out_fold_y_test_pred = cv_clf.predict(out_fold_X_test)
     print('Fold'+str(out_fold)+' - Imbalanced', cv_clf.best_params_)
 
-    imbalanced_pred.append((out_fold_users_test, out_fold_y_test,
-                            out_fold_y_test_pred))
+    imbalanced_pred.append((out_fold_users_test, out_fold_ts_test, out_fold_y_test,
+                            out_fold_y_test_pred, out_fold_fnames_test))
     imbalanced_imp = imbalanced_imp + \
                       cv_clf.best_estimator_.named_steps['clf'].feature_importances_
 
@@ -236,8 +243,8 @@ def main(argv):
     out_fold_y_test_pred = cv_clf.predict(out_fold_X_test_sc)
     print('Fold'+str(out_fold)+' - Balanced', cv_clf.best_params_)
 
-    balanced_pred.append((out_fold_users_test, out_fold_y_test,
-                          out_fold_y_test_pred))
+    balanced_pred.append((out_fold_users_test, out_fold_ts_test, out_fold_y_test,
+                          out_fold_y_test_pred, out_fold_fnames_test))
     balanced_imp = balanced_imp + cv_clf.best_estimator_.feature_importances_
 
   # Get imbalanced classification reports
