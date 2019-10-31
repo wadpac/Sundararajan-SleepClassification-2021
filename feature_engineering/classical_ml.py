@@ -53,8 +53,8 @@ def get_classification_report(pred_list, mode, sleep_states):
     class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0}
   confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
   for i in range(nfolds):
-    y_true = pred_list[i][0]
-    y_pred = pred_list[i][1]
+    y_true = pred_list[i][2]
+    y_pred = pred_list[i][3]
     # Get metrics across all classes
     prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred,
                                                           average='macro')
