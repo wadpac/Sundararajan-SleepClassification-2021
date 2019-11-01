@@ -52,6 +52,7 @@ def get_classification_report(pred_list, mode, sleep_states):
   for state in sleep_states:
     class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0}
   confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
+  sleep_labels = [idx for idx,state in enumerate(sleep_states)]
   for i in range(nfolds):
     y_true = pred_list[i][2]
     y_pred = pred_list[i][3]
@@ -61,16 +62,16 @@ def get_classification_report(pred_list, mode, sleep_states):
     acc = accuracy_score(y_true, y_pred)
     precision += prec; recall += rec; fscore += fsc; accuracy += acc
     # Get metrics per class
-    fold_class_metrics = classification_report(y_true, y_pred, labels=sleep_states,
+    fold_class_metrics = classification_report(y_true, y_pred, labels=sleep_labels,
                                    target_names=sleep_states, output_dict=True)
     for state in sleep_states:
       class_metrics[state]['precision'] += fold_class_metrics[state]['precision']
       class_metrics[state]['recall'] += fold_class_metrics[state]['recall']
       class_metrics[state]['f1-score'] += fold_class_metrics[state]['f1-score']
     # Get confusion matrix
-    fold_conf_mat = confusion_matrix(y_true, y_pred, labels=sleep_states).astype(np.float)
+    fold_conf_mat = confusion_matrix(y_true, y_pred, labels=sleep_labels).astype(np.float)
     for idx,state in enumerate(sleep_states):
-      fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == state]))
+      fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == sleep_labels[idx]]))
     confusion_mat = confusion_mat + fold_conf_mat
 
   # Average metrics across all folds
