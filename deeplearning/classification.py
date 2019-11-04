@@ -17,7 +17,7 @@ from sklearn.metrics import precision_recall_fscore_support, accuracy_score, cla
 from sklearn.utils import class_weight
 
 from metrics import macro_f1
-from losses import weighted_categorical_crossentropy
+from losses import weighted_categorical_crossentropy, focal_loss
 import matplotlib.pyplot as plt
 
 np.random.seed(2)
@@ -42,6 +42,18 @@ class F1scoreHistory(keras.callbacks.Callback):
     #self.f1score['val'].append(logs.get('val_macro_f1'))
     #self.mean_f1score['val'].append(np.mean(self.f1score['val'][-100:]))
 
+def plot_results(fold, train_result, val_result, out_fname, metric='Loss'):
+  plt.Figure()
+  plt.plot(train_result, label='train')
+  plt.plot(val_result, label='val')
+  plt.title('{} for fold {}'.format(metric, fold))
+  plt.ylabel(metric)
+  plt.xlabel('Epochs')
+  plt.ylim(0,1)
+  plt.legend(['Train', 'Test'], loc='upper right')
+  plt.savefig(out_fname)
+  plt.clf()
+
 def save_user_report(pred_list, sleep_states, fname):
   nfolds = len(pred_list)
   for i in range(nfolds):
@@ -61,27 +73,31 @@ def get_classification_report(pred_list, mode, sleep_states):
   nfolds = len(pred_list)
   precision = 0.0; recall = 0.0; fscore = 0.0; accuracy = 0.0
   class_metrics = {}
+  sleep_labels = [idx for idx,state in enumerate(sleep_states)]
   for state in sleep_states:
     class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0}
   confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
   for i in range(nfolds):
     y_true = pred_list[i][1]
     y_pred = pred_list[i][2]
+    # Get metrics across all classes
     prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred, average='macro')
     acc = accuracy_score(y_true, y_pred)
     precision += prec; recall += rec; fscore += fsc; accuracy += acc
-    fold_class_metrics = classification_report(y_true, y_pred, \
+    # Get metrics per class
+    fold_class_metrics = classification_report(y_true, y_pred, labels=sleep_labels,
                                           target_names=sleep_states, output_dict=True)
     for state in sleep_states:
       class_metrics[state]['precision'] += fold_class_metrics[state]['precision']
       class_metrics[state]['recall'] += fold_class_metrics[state]['recall']
       class_metrics[state]['f1-score'] += fold_class_metrics[state]['f1-score']
-
-    fold_conf_mat = confusion_matrix(y_true, y_pred).astype(np.float)
+    # Get confusion matrix
+    fold_conf_mat = confusion_matrix(y_true, y_pred, labels=sleep_labels).astype(np.float)
     for idx in range(len(sleep_states)):
       fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == idx]))
     confusion_mat = confusion_mat + fold_conf_mat
 
+  # Average metrics across all folds
   precision = precision/nfolds; recall = recall/nfolds
   fscore = fscore/nfolds; accuracy = accuracy/nfolds
   print('\nPrecision = %0.4f' % (precision*100.0))
@@ -102,7 +118,7 @@ def get_classification_report(pred_list, mode, sleep_states):
   # Confusion matrix
   confusion_mat = confusion_mat / nfolds
   if mode == 'multiclass':
-    print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\n')
+    print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\tNonwear\n')
     for i in range(len(sleep_states)):
       print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0],\
               confusion_mat[i][1], confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
@@ -114,15 +130,45 @@ def get_classification_report(pred_list, mode, sleep_states):
               confusion_mat[i][1], confusion_mat[i][2]))
     print('\n')
 
+def get_ENMO(x,y,z):
+  enorm = np.sqrt(x*x + y*y + z*z)
+  enmo = np.maximum(enorm - 1.0, 0.0)
+  return enmo
+
+# Get Locomotor Inactivity During Sleep   
+def get_LIDS(x,y,z):
+  enmo = get_ENMO(x,y,z)
+  enmo_sub = np.where(enmo < 0.02, 0, enmo-0.02) # assuming ENMO is in g
+  win_sz = 11
+  enmo_sub_smooth = np.convolve(enmo_sub, np.ones((win_sz,)), 'same')/float(win_sz)
+  lids = 100.0 / (enmo_sub_smooth + 1.0)
+  win_sz = 51
+  lids_smooth = np.convolve(lids, np.ones((win_sz,)), 'same')/float(win_sz)
+  return lids_smooth
+
 def get_partition(files, labels, users, sel_users, sleep_states, is_train=False):
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
   labels = np.array([sleep_states.index(lbl) for lbl in labels])
-  #is_train = False
+  indices = np.array([i for i,user in enumerate(users) if ((user in sel_users) and (labels[i] != wake_ext_idx))])
   if is_train: # use extra wake samples only for training
-    indices = np.array([i for i,user in enumerate(users) if (user in sel_users)])
-  else: 
-    indices = np.array([i for i,user in enumerate(users) if ((user in sel_users) and (labels[i] != wake_ext_idx))])
+    # Determine LIDS score of wake samples  
+    wake_indices = indices[labels[indices] == wake_idx]
+    wake_samp = np.zeros((len(wake_indices), 1))
+    for i,index in enumerate(wake_indices):
+      samp = np.load(files[index])
+      lids = get_LIDS(samp[:,0], samp[:,1], samp[:,2])
+      wake_samp[i] = lids.mean()
+    wake_perc = np.percentile(wake_samp,50)
+    # Choose extra wake samples whose LIDS score is less than 50% percentile of LIDS score of wake samples
+    wake_ext_indices = np.array([i for i,user in enumerate(users) if ((user in sel_users) and (labels[i] == wake_ext_idx))])
+    valid_indices = []
+    for i,index in enumerate(wake_ext_indices):
+      samp = np.load(files[index])
+      lids = get_LIDS(samp[:,0], samp[:,1], samp[:,2])
+      if lids.mean() < wake_perc:
+        valid_indices.append(index)
+    indices = np.concatenate((indices, np.array(valid_indices)))
   part_files = np.array(files)[indices]
   part_labels = labels[indices]
   part_users = [users[i] for i in indices]
@@ -166,9 +212,9 @@ def main(argv):
   seqlen, n_channels = np.load(files[0]).shape
 
   # Hyperparameters
-  lr = 0.001 # learning rate
+  lr = 0.0002 # learning rate
   num_epochs = 30
-  batch_size = 64
+  batch_size = 128
 
   # Use nested cross-validation based on users
   # Outer CV
@@ -191,6 +237,10 @@ def main(argv):
                                                             sleep_states, is_train=True)
     val_fnames, val_labels, val_users = get_partition(files, labels, users, val_users, sleep_states)
     test_fnames, test_labels, test_users = get_partition(files, labels, users, test_users, sleep_states)
+    nsamples = len(train_fnames) + len(val_fnames) + len(test_fnames)
+    print('Train: {:0.2f}%, Val: {:0.2f}%, Test: {:0.2f}%'\
+            .format(len(train_fnames)*100.0/nsamples, len(val_fnames)*100.0/nsamples,\
+                    len(test_fnames)*100.0/nsamples))
 
     # Create data generators 
     train_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='train',\
@@ -217,8 +267,9 @@ def main(argv):
 
     # Create model
     model = FCN(input_shape=(seqlen,n_channels), num_classes=len(valid_sleep_states))
-    model.compile(optimizer=Adam(lr=lr), loss=weighted_categorical_crossentropy(class_wts),
-                  metrics=[macro_f1])
+    print(model.summary())
+    model.compile(optimizer=Adam(lr=lr), loss=focal_loss(),
+                  metrics=['accuracy', macro_f1])
 
     # Train model
     # Use early stopping and model checkpoints to handle overfitting and save best model
@@ -226,21 +277,19 @@ def main(argv):
                                                  monitor='val_macro_f1',\
                                                  mode='max', save_best_only=True)
     history = model.fit_generator(train_gen, epochs=num_epochs, validation_data=val_gen,
-                                  verbose=True, class_weight=class_wts, #steps_per_epoch=1000,
+                                  verbose=True, #class_weight=class_wts, #steps_per_epoch=1000,
                                   callbacks=[model_checkpt])#, workers=10, use_multiprocessing=True)
 
     # Plot training history
-    plt.Figure()
-    plt.plot(history.history['loss'], label='train')
-    plt.plot(history.history['val_loss'], label='val')
-    plt.title('Loss for fold {}'.format(fold))
-    plt.ylabel('Loss')
-    plt.xlabel('Epochs')
-    plt.legend(['Train', 'Test'], loc='upper right')
-    plt.savefig(os.path.join(resultdir,'Fold'+str(fold)+'_performance_curve.jpg'))
-    plt.clf()
+    plot_results(fold+1, history.history['loss'], history.history['val_loss'],\
+                 os.path.join(resultdir,'Fold'+str(fold+1)+'_loss.jpg'), metric='Loss')
+    plot_results(fold+1, history.history['accuracy'], history.history['val_accuracy'],\
+                 os.path.join(resultdir,'Fold'+str(fold+1)+'_accuracy.jpg'), metric='Accuracy')
+    plot_results(fold+1, history.history['macro_f1'], history.history['val_macro_f1'],\
+                 os.path.join(resultdir,'Fold'+str(fold+1)+'_macro_f1.jpg'), metric='Macro F1')
     
-    # Predict probability on validation data
+    # Predict probability on validation data using best model
+    model.load_weights(os.path.join(resultdir,'best_model_fold'+str(fold+1)+'.h5'))
     probs = model.predict_generator(test_gen)
     y_pred = probs.argmax(axis=1)
     y_true = test_labels
