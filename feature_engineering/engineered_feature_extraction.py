@@ -70,7 +70,9 @@ def get_stats(timestamp, feature, time_interval):
   stats = np.vstack((feat_mean['feature'], feat_std['feature'], feat_min['feature'], 
                      feat_max['feature'], feat_mad['feature'], feat_ent1['feature'], 
                      feat_ent2['feature'], feat_prevdiff, feat_nextdiff)).T
-  return stats
+
+  # return index and stats
+  return np.array(feat_mean.index.values, dtype='str'), stats
 
 def get_categ(df, default='NaN'):
   ctr = Counter(df)
@@ -122,9 +124,9 @@ def main(argv):
     LIDS = get_LIDS(timestamp, ENMO)
     
     # Get statistics of features for given time intervals
-    ENMO_stats = get_stats(timestamp, ENMO, time_interval)
-    angle_z_stats = get_stats(timestamp, angle_z, time_interval)
-    LIDS_stats = get_stats(timestamp, LIDS, time_interval)
+    _, ENMO_stats = get_stats(timestamp, ENMO, time_interval)
+    _, angle_z_stats = get_stats(timestamp, angle_z, time_interval)
+    timestamp_agg, LIDS_stats = get_stats(timestamp, LIDS, time_interval)
     feat = np.hstack((ENMO_stats, angle_z_stats, LIDS_stats))
            
     # Get nonwear for each interval
@@ -145,14 +147,14 @@ def main(argv):
     label_agg[(np.isin(label_agg, states, invert=True))
               & (nonwear_agg == True)] = 'Nonwear'
       
-    # Get valid features and labels
+    # Get valid timestamps, features and labels
+    timestamp_valid = timestamp_agg[label_agg != 'NaN'].reshape(-1,1)
     feat_valid = feat[label_agg != 'NaN',:]
-    label_valid = label_agg[label_agg != 'NaN']
-    print(len(feat), len(feat_valid))
+    label_valid = label_agg[label_agg != 'NaN'].reshape(-1,1)
     
     # Write features to CSV file
-    data = np.hstack((feat_valid, label_valid.reshape(-1,1)))
-    cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad',
+    data = np.hstack((timestamp_valid.reshape(-1,1), feat_valid, label_valid.reshape(-1,1)))
+    cols = ['timestamp','ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad',
             'ENMO_entropy1','ENMO_entropy2','ENMO_prevdiff','ENMO_nextdiff', 
             'angz_mean','angz_std','angz_min','angz_max','angz_mad',
             'angz_entropy1','angz_entropy2','angz_prevdiff','angz_nextdiff', 
@@ -176,7 +178,8 @@ def main(argv):
     df['user'] = user  
     df['position'] = position
     df['dataset'] = dataset
-    
+    df['filename'] = fname
+  
     # Save data to CSV
     if idx == 0:
       df.to_csv(os.path.join(outdir,'sleep_data_' + str(time_interval) + 's.csv'),
