@@ -45,22 +45,22 @@ class DataGenerator(keras.utils.Sequence):
         end_idx = len(self.filenames)
       indices = self.indices[st_idx:end_idx]
     else: # Balance each minibatch to have same number of classes
-      # Get number of indices from each class
+      # Get indices from all classes as per data distribution
+      # Augment samples to balance classes
       if self.augment == True:
         assert self.aug_factor > 0.0
       aug_factor = 1.0 + self.aug_factor
-      cls_sz = int((self.batch_size / aug_factor) // self.n_classes)
-      if cls_sz * aug_factor * self.n_classes < self.batch_size:
-        cls_sz += 1
-      # Generate indices with balanced classes
-      indices = []
+      # Generate indices with same distributin as data
+      orig_sz = int(self.batch_size/aug_factor)
       all_indices = np.arange(len(self.filenames))
-      for cls in range(len(self.classes)):
-        cls_idx = all_indices[self.labels == cls]
-        indices.extend(np.random.choice(cls_idx,cls_sz,replace=False))          
+      # Ensure each class has atleast one sample
+      samp_sz = [0] * self.n_classes
+      while 0 in samp_sz:
+        indices = np.random.choice(all_indices, orig_sz, replace=False)
+        samp_sz = [len(indices[self.labels[indices] == cls]) for cls in range(self.n_classes)]
       # Choose batch sized indices
       random.shuffle(indices)
-      indices = indices[:self.batch_size]
+      indices = indices[:orig_sz]
       
     # Generate data
     X, y = self.__data_generation(indices)
@@ -68,35 +68,68 @@ class DataGenerator(keras.utils.Sequence):
     return X, y
 
   def __data_generation(self, indices):
-    'Generates data containing batch_size samples' # X : (n_samples, *dim, n_channels)
-    # Initialization
-    X = np.zeros((self.batch_size, self.seqlen, self.n_channels))
-    y = np.ones((self.batch_size), dtype=int) * -1
-
-    # Generate data
-    for i, idx in enumerate(indices):
-      X[i,] = np.load(self.filenames[idx])
-      y[i] = self.labels[idx]
-
-    # Augment data
-    N = len(indices)
+    'Generates data containing batch_size samples'
+    # X : (n_samples, *dim, n_channels)
     if self.augment == True:
-      # Choose a subset of samples to apply transformations for augmentation
-      n_aug = self.batch_size - N
-      aug_indices = np.random.choice(indices, n_aug, replace=True)
-      aug_x = np.zeros((n_aug, self.seqlen, self.n_channels))
-      for i,idx in enumerate(aug_indices):
-        y[N+i] = self.labels[idx]
-        aug_x[i,] = np.load(self.filenames[idx])
-      # Apply one or two transformations to the chosen data
-      aug_x = random.choice(self.aug_func)(aug_x)
-      toss = random.choice([0,1])
-      if toss == 1:
-        aug_x = random.choice(self.aug_func)(aug_x)
-      X[N:,] = aug_x
-    else: # resize batch if less than batch size - usually last batch
-      X = X[:N]
-      y = y[:N]
+      # Initialization
+      X = np.zeros((self.batch_size, self.seqlen, self.n_channels))
+      y = np.ones((self.batch_size), dtype=int) * -1
+  
+      # Get number of samples per class after agumentation
+      aug_factor = 1.0 + self.aug_factor
+      cls_sz = self.batch_size // self.n_classes
+      # number of samples from disk for each class
+      samp_sz = [min(cls_sz, len(indices[self.labels[indices] == cls])) for cls in range(self.n_classes)]
+      # number of samples to be augmented for each class
+      aug_sz = [cls_sz - samp_sz[cls] for cls in range(self.n_classes)]
+      sum_samp = sum(samp_sz) + sum(aug_sz)
+      if sum_samp < self.batch_size:
+        # Add more augmentation to smallest class
+        idx = samp_sz.index(min(samp_sz))
+        aug_sz[idx] += self.batch_size - sum_samp
+      else:
+        # Remove samples from largest class
+        idx = samp_sz.index(max(samp_sz))
+        aug_sz[idx] -= sum_samp - self.batch_size
+      sum_samp = sum(samp_sz) + sum(aug_sz)
+      assert sum_samp == self.batch_size
+
+      # Generate data per class
+      offset = 0
+      for cls in range(self.n_classes):
+        # Load data from disk
+        cls_indices = indices[self.labels[indices] == cls][:samp_sz[cls]]
+        for i, idx in enumerate(cls_indices):
+          X[offset+i,] = np.load(self.filenames[idx])
+          y[offset+i] = self.labels[idx]
+        # Choose a subset of samples to apply transformations for augmentation
+        if aug_sz[cls] > 0:
+          N = len(cls_indices)
+          aug_indices = np.random.choice(cls_indices, aug_sz[cls], replace=True)
+          aug_x = np.zeros((aug_sz[cls], self.seqlen, self.n_channels))
+          for i,idx in enumerate(aug_indices):
+            y[offset+N+i] = self.labels[idx]
+            aug_x[i,] = np.load(self.filenames[idx])
+          # Apply one or two transformations to the chosen data
+          aug_x = random.choice(self.aug_func)(aug_x)
+          toss = random.choice([0,1])
+          if toss == 1:
+            aug_x = random.choice(self.aug_func)(aug_x)
+          X[offset+N:offset+N+aug_sz[cls],:,:] = aug_x
+        offset += samp_sz[cls] + aug_sz[cls]
+      # Shuffle original and augmented data
+      idx = np.arange(self.batch_size)
+      np.random.shuffle(idx)
+      X = X[idx]
+      y = y[idx]
+    else: 
+      # Initialization
+      X = np.zeros((len(indices), self.seqlen, self.n_channels))
+      y = np.ones((len(indices)), dtype=int) * -1
+  
+      for i, idx in enumerate(indices):
+        X[i,] = np.load(self.filenames[idx])
+        y[i] = self.labels[idx]
 
     # Normalize data if mean and std are present
     if self.mean is not None and self.std is not None:

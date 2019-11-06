@@ -167,18 +167,18 @@ def FCN(input_shape, num_classes=2, activation='relu'):
   x = identity_block(x, ksz=3, filters=[32,32,64], stage=2, block='b')
   x = identity_block(x, ksz=3, filters=[32,32,64], stage=2, block='c')
 
-  # Stage 3
-  x = conv_block(x, ksz=3, filters=[64,64,128], stage=3, block='a', s=2)
-  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='b')
-  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='c')
-  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='d')
+#  # Stage 3
+#  x = conv_block(x, ksz=3, filters=[64,64,128], stage=3, block='a', s=2)
+#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='b')
+#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='c')
+#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='d')
 
-  # Stage 4
-  x = conv_block(x, ksz=3, filters=[128,128,256], stage=4, block='a', s=2)
-  x = identity_block(x, ksz=3, filters=[128,128,256], stage=4, block='b')
-  x = identity_block(x, ksz=3, filters=[128,128,256], stage=4, block='c')
-  x = identity_block(x, ksz=3, filters=[128,128,256], stage=4, block='d')
-  x = identity_block(x, ksz=3, filters=[128,128,256], stage=4, block='e')
+#  # Stage 4
+#  x = conv_block(x, ksz=3, filters=[128,128,256], stage=4, block='a', s=2)
+#  x = identity_block(x, ksz=3, filters=[128,128,256], stage=4, block='b')
+#  x = identity_block(x, ksz=3, filters=[128,128,256], stage=4, block='c')
+#  x = identity_block(x, ksz=3, filters=[128,128,256], stage=4, block='d')
+#  x = identity_block(x, ksz=3, filters=[128,128,256], stage=4, block='e')
 
 #  # Stage 5
 #  x = conv_block(x, ksz=3, filters=[256,256,512], stage=5, block='a', s=2)
@@ -189,7 +189,7 @@ def FCN(input_shape, num_classes=2, activation='relu'):
 #  x = identity_block(x, ksz=3, filters=[256,256,512], stage=5, block='f')
 
   # Output stage
-  x = Conv1DTranspose(x, filters=64, ksz=5, s=16)
+  x = Conv1DTranspose(x, filters=64, ksz=5, s=4)
   x = GlobalAveragePooling1D()(x)
   outputs = Dense(num_classes, activation='softmax',
                   kernel_initializer=glorot_uniform(seed=0))(x)
