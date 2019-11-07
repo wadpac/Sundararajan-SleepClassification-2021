@@ -110,11 +110,11 @@ class DataGenerator(keras.utils.Sequence):
           for i,idx in enumerate(aug_indices):
             y[offset+N+i] = self.labels[idx]
             aug_x[i,] = np.load(self.filenames[idx])
-          # Apply one or two transformations to the chosen data
-          aug_x = random.choice(self.aug_func)(aug_x)
+          # Apply one or two transformations to x,y,z of the chosen data
+          aug_x[:,:,:3] = random.choice(self.aug_func)(aug_x)
           toss = random.choice([0,1])
           if toss == 1:
-            aug_x = random.choice(self.aug_func)(aug_x)
+            aug_x[:,:,:3] = random.choice(self.aug_func)(aug_x)
           X[offset+N:offset+N+aug_sz[cls],:,:] = aug_x
         offset += samp_sz[cls] + aug_sz[cls]
       # Shuffle original and augmented data

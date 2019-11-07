@@ -50,7 +50,7 @@ def plot_results(fold, train_result, val_result, out_fname, metric='Loss'):
   plt.ylabel(metric)
   plt.xlabel('Epochs')
   plt.ylim(0,1)
-  plt.legend(['Train', 'Test'], loc='upper right')
+  plt.legend(['Train', 'Val'], loc='upper right')
   plt.savefig(out_fname)
   plt.clf()
 
@@ -210,9 +210,10 @@ def main(argv):
   early_stopping = EarlyStopping(monitor='val_macro_f1', mode='max', verbose=1, patience=2)
 
   seqlen, n_channels = np.load(files[0]).shape
+  print(seqlen, n_channels)
 
   # Hyperparameters
-  lr = 0.0002 # learning rate
+  lr = 0.0005 # learning rate
   num_epochs = 30
   batch_size = 128
 

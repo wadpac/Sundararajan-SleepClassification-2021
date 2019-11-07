@@ -7,6 +7,7 @@ from keras.initializers import glorot_uniform
 from keras.regularizers import l2
 import keras.backend as K
 from keras.models import Model
+from keras.constraints import MaxNorm
 
 def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
   """
@@ -37,18 +38,21 @@ def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
   # Main path
   x = Conv1D(filters=F1, kernel_size=1, strides=1, padding='valid',
              name=conv_base_name + '2a',
+             kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
              kernel_initializer=glorot_uniform(seed=0))(inputs)
   x = BatchNormalization(axis=2, name=bn_base_name + '2a')(x)
   x = Activation(activation)(x)
 
   x = Conv1D(filters=F2, kernel_size=ksz, strides=1, padding='same',
              name=conv_base_name + '2b',
+             kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = BatchNormalization(axis=2, name=bn_base_name + '2b')(x)
   x = Activation(activation)(x)
 
   x = Conv1D(filters=F3, kernel_size=1, strides=1, padding='valid',
              name=conv_base_name + '2c',
+             kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = BatchNormalization(axis=2, name=bn_base_name + '2c')(x)
   x = Activation(activation)(x)
@@ -85,24 +89,28 @@ def conv_block(inputs, filters, ksz, stage, block, s=2, activation='relu'):
   x_shortcut = inputs
   x_shortcut = Conv1D(filters=F3, kernel_size=1, strides=s, padding='valid',
                       name=conv_base_name + '1',
+                      kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
                       kernel_initializer=glorot_uniform(seed=0))(x_shortcut)
   x_shortcut = BatchNormalization(axis=2, name=bn_base_name + '1')(x_shortcut)
 
   # Main path
   x = Conv1D(filters=F1, kernel_size=1, strides=s, padding='valid',
              name=conv_base_name + '2a',
+             kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
              kernel_initializer=glorot_uniform(seed=0))(inputs)
   x = BatchNormalization(axis=2, name=bn_base_name + '2a')(x)
   x = Activation(activation)(x)
 
   x = Conv1D(filters=F2, kernel_size=ksz, strides=1, padding='same',
              name=conv_base_name + '2b',
+             kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = BatchNormalization(axis=2, name=bn_base_name + '2b')(x)
   x = Activation(activation)(x)
 
   x = Conv1D(filters=F3, kernel_size=1, strides=1, padding='valid',
              name=conv_base_name + '2c',
+             kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = BatchNormalization(axis=2, name=bn_base_name + '2c')(x)
   x = Activation(activation)(x)
@@ -128,7 +136,10 @@ def Conv1DTranspose(inputs, filters, ksz, s=2, padding='same'):
   x : output tensor of shape (batch_size, num_steps, num_ch)
   """
   x = Lambda(lambda x: K.expand_dims(x, axis=2))(inputs)
-  x = Conv2DTranspose(filters=filters, kernel_size=(ksz, 1), strides=(s, 1), padding=padding)(x)
+  x = Conv2DTranspose(filters=filters, kernel_size=(ksz, 1), strides=(s, 1), padding=padding,
+                      name='conv_transpose',
+                      kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
+                      kernel_initializer=glorot_uniform(seed=0))(x)
   x = Lambda(lambda x: K.squeeze(x, axis=2))(x)
   return x
 
@@ -151,13 +162,14 @@ def FCN(input_shape, num_classes=2, activation='relu'):
   inputs = Input(shape = input_shape)
 
   # Zero padding and input normalization
-  maxlen = 1504 # max seqlen supported by this architecture
+  maxlen = 4504 # max seqlen supported by this architecture
   pad_wd = (maxlen - input_shape[0])//2
   x = ZeroPadding1D(pad_wd)(inputs)
   x = BatchNormalization()(x)
 
   # Stage 1
-  x = Conv1D(filters=64, kernel_size=7, strides=2, padding='valid', \
+  x = Conv1D(filters=64, kernel_size=7, strides=2, padding='valid',
+             kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
              name = 'conv1', kernel_initializer=glorot_uniform(seed=0))(x)
   x = BatchNormalization(axis=2, name='bn_conv1')(x)
   x = Activation(activation)(x)
@@ -167,11 +179,11 @@ def FCN(input_shape, num_classes=2, activation='relu'):
   x = identity_block(x, ksz=3, filters=[32,32,64], stage=2, block='b')
   x = identity_block(x, ksz=3, filters=[32,32,64], stage=2, block='c')
 
-#  # Stage 3
-#  x = conv_block(x, ksz=3, filters=[64,64,128], stage=3, block='a', s=2)
-#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='b')
-#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='c')
-#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='d')
+  # Stage 3
+  x = conv_block(x, ksz=3, filters=[64,64,128], stage=3, block='a', s=2)
+  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='b')
+  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='c')
+  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='d')
 
 #  # Stage 4
 #  x = conv_block(x, ksz=3, filters=[128,128,256], stage=4, block='a', s=2)
@@ -189,9 +201,10 @@ def FCN(input_shape, num_classes=2, activation='relu'):
 #  x = identity_block(x, ksz=3, filters=[256,256,512], stage=5, block='f')
 
   # Output stage
-  x = Conv1DTranspose(x, filters=64, ksz=5, s=4)
+  x = Conv1DTranspose(x, filters=64, ksz=5, s=8)
   x = GlobalAveragePooling1D()(x)
   outputs = Dense(num_classes, activation='softmax',
+                  kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),
                   kernel_initializer=glorot_uniform(seed=0))(x)
 
   model = Model(inputs=inputs, outputs=outputs)
