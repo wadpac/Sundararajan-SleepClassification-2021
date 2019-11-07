@@ -6,7 +6,7 @@ def main(argv):
   infile = argv[0]
 
   df = pd.read_csv(infile)
-  #df = df[df['dataset'] == 'UPenn'].reset_index()
+  df = df[df['label'] != 'Nonwear'].reset_index()
   df['binary_label'] = df['label']
   df.loc[df['label'] == 'NREM 1','binary_label'] = 'Sleep'
   df.loc[df['label'] == 'NREM 2','binary_label'] = 'Sleep'
@@ -24,9 +24,11 @@ def main(argv):
   y_pred = df['heuristic']
   precision, recall, fscore, _ = precision_recall_fscore_support(y_true, y_pred, 
                                      labels=['Wake','Sleep'], average='macro')
+  accuracy = accuracy_score(y_true, y_pred)
   print('Precision = %0.4f' % (precision*100.0))
   print('Recall = %0.4f' % (recall*100.0))
   print('F-score = %0.4f' % (fscore*100.0))
+  print('Accuracy = %0.4f' % (accuracy*100.0))
   print(classification_report(y_true,y_pred,digits=4))
 
 if __name__ == "__main__":
