@@ -124,8 +124,9 @@ def main(argv):
   dataset = argv[2]
   outdir = argv[3]
 
-  if not os.path.exists(outdir):
-    os.makedirs(outdir)
+  resultdir = os.path.join(outdir,'models')
+  if not os.path.exists(resultdir):
+    os.makedirs(resultdir)
 
   # Read data file and retain data only corresponding to 5 sleep states or nonwear
   df = pd.read_csv(infile, dtype={'label':object, 'user':object,
@@ -200,6 +201,8 @@ def main(argv):
                             cv=custom_cv_indices, scoring='f1_macro', n_iter=5,
                             n_jobs=-1, verbose=2)
     cv_clf.fit(out_fold_X_train, out_fold_y_train)
+    pickle.dump(cv_clf, open(os.path.join(resultdir,\
+                'fold'+str(out_fold)+'_'+ mode + '_imbalanced_RF.sav'),'wb'))
     out_fold_y_test_pred = cv_clf.predict(out_fold_X_test)
     print('Fold'+str(out_fold)+' - Imbalanced', cv_clf.best_params_)
 
@@ -244,6 +247,8 @@ def main(argv):
                             cv=custom_resamp_cv_indices, scoring='f1_macro',
                             n_iter=5, n_jobs=-1, verbose=2)
     cv_clf.fit(out_fold_X_train_resamp, out_fold_y_train_resamp)
+    pickle.dump(cv_clf, open(os.path.join(resultdir,\
+                'fold'+str(out_fold)+'_'+ mode + '_balanced_RF.sav'),'wb'))
     out_fold_y_test_pred = cv_clf.predict(out_fold_X_test_sc)
     print('Fold'+str(out_fold)+' - Balanced', cv_clf.best_params_)
 

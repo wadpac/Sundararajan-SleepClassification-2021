@@ -2,8 +2,8 @@
 # Use epoch level data to calculate sleep classification  with heuristic method (van Hees 2015 PLOSONE)
 
 library(data.table)
-fname = "C:/Research/actigraphy/data/amc_new/features/sleep_data_30.0s.csv"
-outputfile = "C:/Research/actigraphy/data/amc_new/features/sleep_data_30.0s_heuristic.csv"
+fname = "C:/Research/actigraphy/data/UPenn_Geneactiv//features/sleep_data_30.0s.csv"
+outputfile = "C:/Research/actigraphy/data/UPenn_Geneactiv/features/sleep_data_30.0s_heuristic.csv"
 
 # parameters for sleep detection algorithm
 timethreshold = 5 # in minutes
