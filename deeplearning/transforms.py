@@ -2,7 +2,7 @@
 # T. T. Um et al., “Data augmentation of wearable sensor data for parkinson’s disease monitoring 
 # using convolutional neural networks,” in Proceedings of the 19th ACM International Conference 
 # on Multimodal Interaction, ser. ICMI 2017. New York, NY, USA: ACM, 2017, pp. 216–220.
-
+import math
 import numpy as np
 from scipy.interpolate import CubicSpline      # for warping
 
@@ -134,3 +134,25 @@ def rand_sampling(X, low=0.6, high=0.8):
     X_new[i,:,1] = np.interp(np.arange(X.shape[1]), tt[i], X[i,tt[i],1])
     X_new[i,:,2] = np.interp(np.arange(X.shape[1]), tt[i], X[i,tt[i],2])
   return X_new
+
+# Get Euclidean Norm minus One
+def get_ENMO(x,y,z):
+  enorm = np.sqrt(x*x + y*y + z*z)
+  ENMO = np.maximum(enorm-1.0, 0.0)
+  return ENMO
+
+# Get tilt angles
+def get_angle_z(x,y,z):
+  angle_z = np.arctan2(z, np.sqrt(x*x + y*y)) * 180.0/math.pi
+  return angle_z
+
+# Get Locomotor Inactivity During Sleep - use convolve instead of rolling sum over intervals 
+def get_LIDS(x,y,z):
+  enmo = get_ENMO(x,y,z)
+  enmo_sub = np.where(enmo < 0.02, 0, enmo-0.02) # assuming ENMO is in g
+  win_sz = 21 # use smaller window size instead of 10-min rolling sum
+  enmo_sub_smooth = np.apply_along_axis(lambda row: np.convolve(row, np.ones((win_sz,)), 'same'), axis=-1, arr=enmo_sub)
+  lids = 100.0 / (enmo_sub_smooth + 1.0)
+  win_sz = 71 # use larger window size instead of 30-min rolling average
+  lids_smooth = np.apply_along_axis(lambda row: np.convolve(row, np.ones((win_sz,)), 'same'), axis=-1, arr=lids)/float(win_sz)
+  return lids_smooth

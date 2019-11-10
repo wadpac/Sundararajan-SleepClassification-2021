@@ -1,5 +1,5 @@
 import numpy as np
-from keras import backend as K
+import tensorflow.keras.backend as K
 
 # Use custom metrics for training and evalution
 
@@ -53,7 +53,7 @@ def weighted_precision(y_true, y_pred):
 
 # get one-hot rep of given tensor
 def get_one_hot(y):
-  return K.one_hot(K.argmax(y,axis=1), y.shape[1].value)
+  return K.one_hot(K.argmax(y,axis=1), y.shape[1])
 
 def fbeta(prec, rec, beta=1.0):
   f_score = ((1+beta) * prec * rec)/(beta*prec + rec + K.epsilon())

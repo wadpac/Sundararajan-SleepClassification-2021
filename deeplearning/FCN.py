@@ -1,13 +1,11 @@
-import keras
-from keras.models import Sequential
-from keras.layers import Input, Dense, Activation, Conv1D, Lambda, \
-    Flatten, Conv2DTranspose, Add, \
-    BatchNormalization, GlobalAveragePooling1D, ZeroPadding1D
-from keras.initializers import glorot_uniform
-from keras.regularizers import l2
-import keras.backend as K
-from keras.models import Model
-from keras.constraints import MaxNorm
+from tensorflow import keras
+from tensorflow.keras import Input, Sequential, Model
+from tensorflow.keras.layers import Dense, Activation, Conv1D, Lambda, Conv2DTranspose,\
+                                    Add, BatchNormalization, GlobalAveragePooling1D, ZeroPadding1D
+from tensorflow.keras.initializers import glorot_uniform
+from tensorflow.keras.regularizers import l2
+import tensorflow.keras.backend as K
+from tensorflow.keras.constraints import MaxNorm
 
 def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
   """
@@ -143,7 +141,7 @@ def Conv1DTranspose(inputs, filters, ksz, s=2, padding='same'):
   x = Lambda(lambda x: K.squeeze(x, axis=2))(x)
   return x
 
-def FCN(input_shape, num_classes=2, activation='relu'):
+def FCN(input_shape, max_seqlen, num_classes=2, activation='relu'):
   """
   Generate a fully convolutional neural network (FCN) model.
 
@@ -162,8 +160,7 @@ def FCN(input_shape, num_classes=2, activation='relu'):
   inputs = Input(shape = input_shape)
 
   # Zero padding and input normalization
-  maxlen = 4504 # max seqlen supported by this architecture
-  pad_wd = (maxlen - input_shape[0])//2
+  pad_wd = (max_seqlen - input_shape[0])//2
   x = ZeroPadding1D(pad_wd)(inputs)
   x = BatchNormalization()(x)
 
@@ -179,11 +176,11 @@ def FCN(input_shape, num_classes=2, activation='relu'):
   x = identity_block(x, ksz=3, filters=[32,32,64], stage=2, block='b')
   x = identity_block(x, ksz=3, filters=[32,32,64], stage=2, block='c')
 
-  # Stage 3
-  x = conv_block(x, ksz=3, filters=[64,64,128], stage=3, block='a', s=2)
-  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='b')
-  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='c')
-  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='d')
+#  # Stage 3
+#  x = conv_block(x, ksz=3, filters=[64,64,128], stage=3, block='a', s=2)
+#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='b')
+#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='c')
+#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='d')
 
 #  # Stage 4
 #  x = conv_block(x, ksz=3, filters=[128,128,256], stage=4, block='a', s=2)
@@ -201,7 +198,7 @@ def FCN(input_shape, num_classes=2, activation='relu'):
 #  x = identity_block(x, ksz=3, filters=[256,256,512], stage=5, block='f')
 
   # Output stage
-  x = Conv1DTranspose(x, filters=64, ksz=5, s=8)
+  x = Conv1DTranspose(x, filters=64, ksz=5, s=4)
   x = GlobalAveragePooling1D()(x)
   outputs = Dense(num_classes, activation='softmax',
                   kernel_constraint=MaxNorm(3), bias_constraint=MaxNorm(3),

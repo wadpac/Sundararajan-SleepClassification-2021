@@ -1,46 +1,34 @@
 import sys,os
 import numpy as np
 import pandas as pd
-import h5py
 import random
-from random import sample
-import tensorflow as tf
-from keras.models import load_model
-import keras.backend as K
-from keras.callbacks import EarlyStopping, ModelCheckpoint
-from keras.optimizers import Adam
 from collections import Counter
 
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import GroupKFold, StratifiedKFold
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.keras.optimizers import Adam
+
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report, confusion_matrix
 from sklearn.utils import class_weight
 
-from metrics import macro_f1
-from losses import weighted_categorical_crossentropy, focal_loss
 import matplotlib.pyplot as plt
-
-np.random.seed(2)
-
-import tensorflow as tf
-import keras
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
-keras.backend.set_session(tf.Session(config=config))
 
 from FCN import FCN
 from datagenerator import DataGenerator
+from transforms import get_LIDS
+from metrics import macro_f1
+from losses import weighted_categorical_crossentropy, focal_loss
 
-class F1scoreHistory(keras.callbacks.Callback):
-  def on_train_begin(self, logs={}):
-    self.f1score = {'train':[], 'val':[]}
-    self.mean_f1score = {'train':[], 'val':[]}
+from tqdm import tqdm
 
-  def on_batch_end(self, batch, logs={}):
-    self.f1score['train'].append(logs.get('macro_f1'))
-    self.mean_f1score['train'].append(np.mean(self.f1score['train'][-500:]))
-    #self.f1score['val'].append(logs.get('val_macro_f1'))
-    #self.mean_f1score['val'].append(np.mean(self.f1score['val'][-100:]))
+np.random.seed(2)
+
+# Limit GPU memory allocated
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+  tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+  tf.config.experimental.set_memory_growth(gpus[0], True)
 
 def plot_results(fold, train_result, val_result, out_fname, metric='Loss'):
   plt.Figure()
@@ -130,27 +118,11 @@ def get_classification_report(pred_list, mode, sleep_states):
               confusion_mat[i][1], confusion_mat[i][2]))
     print('\n')
 
-def get_ENMO(x,y,z):
-  enorm = np.sqrt(x*x + y*y + z*z)
-  enmo = np.maximum(enorm - 1.0, 0.0)
-  return enmo
-
-# Get Locomotor Inactivity During Sleep   
-def get_LIDS(x,y,z):
-  enmo = get_ENMO(x,y,z)
-  enmo_sub = np.where(enmo < 0.02, 0, enmo-0.02) # assuming ENMO is in g
-  win_sz = 11
-  enmo_sub_smooth = np.convolve(enmo_sub, np.ones((win_sz,)), 'same')/float(win_sz)
-  lids = 100.0 / (enmo_sub_smooth + 1.0)
-  win_sz = 51
-  lids_smooth = np.convolve(lids, np.ones((win_sz,)), 'same')/float(win_sz)
-  return lids_smooth
-
 def get_partition(files, labels, users, sel_users, sleep_states, is_train=False):
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
   labels = np.array([sleep_states.index(lbl) for lbl in labels])
-  indices = np.array([i for i,user in enumerate(users) if ((user in sel_users) and (labels[i] != wake_ext_idx))])
+  indices = np.arange(len(users))[np.isin(users, sel_users)] #([i for i,user in enumerate(users) if user in sel_users])
   if is_train: # use extra wake samples only for training
     # Determine LIDS score of wake samples  
     wake_indices = indices[labels[indices] == wake_idx]
@@ -161,19 +133,22 @@ def get_partition(files, labels, users, sel_users, sleep_states, is_train=False)
       wake_samp[i] = lids.mean()
     wake_perc = np.percentile(wake_samp,50)
     # Choose extra wake samples whose LIDS score is less than 50% percentile of LIDS score of wake samples
-    wake_ext_indices = np.array([i for i,user in enumerate(users) if ((user in sel_users) and (labels[i] == wake_ext_idx))])
+    wake_ext_indices = indices[labels[indices] == wake_ext_idx]
     valid_indices = []
     for i,index in enumerate(wake_ext_indices):
       samp = np.load(files[index])
       lids = get_LIDS(samp[:,0], samp[:,1], samp[:,2])
       if lids.mean() < wake_perc:
         valid_indices.append(index)
-    indices = np.concatenate((indices, np.array(valid_indices)))
+    indices = np.concatenate((indices[labels[indices] != wake_ext_idx], np.array(valid_indices)))
+  else:
+    indices = indices[labels[indices] != wake_ext_idx]
   part_files = np.array(files)[indices]
   part_labels = labels[indices]
   part_users = [users[i] for i in indices]
   if is_train: # relabel extra wake samples as wake for training
     part_labels[part_labels == wake_ext_idx] = wake_idx
+  
   return part_files, part_labels, part_users
 
 def main(argv):
@@ -216,6 +191,8 @@ def main(argv):
   lr = 0.0005 # learning rate
   num_epochs = 30
   batch_size = 128
+  max_seqlen = 1504
+  feat_channels = 3 # Add ENMO, z-angle and LIDS as additional channels
 
   # Use nested cross-validation based on users
   # Outer CV
@@ -242,32 +219,25 @@ def main(argv):
     print('Train: {:0.2f}%, Val: {:0.2f}%, Test: {:0.2f}%'\
             .format(len(train_fnames)*100.0/nsamples, len(val_fnames)*100.0/nsamples,\
                     len(test_fnames)*100.0/nsamples))
-
+    
     # Create data generators 
     train_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='train',\
-                              batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                              n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75,\
-                              balance=True)
-    
-    #print('Fold {}: Computing mean and standard deviation'.format(fold+1))
-    #mean, std = train_gen.fit()
-    
-    # Use batchnorm as first step since compute mean and std 
-    # across entire dataset is time-consuming
-    mean = None; std = None 
+                              batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
+                              n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True)
     val_gen = DataGenerator(val_fnames, val_labels, valid_sleep_states, partition='val',\
-                            batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                            n_classes=num_classes, mean=mean, std=std)
+                            batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
+                            n_classes=num_classes)
     test_gen = DataGenerator(test_fnames, test_labels, valid_sleep_states, partition='test',\
-                             batch_size=batch_size, seqlen=seqlen, n_channels=n_channels,\
-                             n_classes=num_classes, mean=mean, std=std)
+                             batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
+                             n_classes=num_classes)
 
     # Get class weights
     class_wts = class_weight.compute_class_weight('balanced', np.unique(train_labels), train_labels)
-    print(class_wts)
-
+   
     # Create model
-    model = FCN(input_shape=(seqlen,n_channels), num_classes=len(valid_sleep_states))
+    # Use batchnorm as first step since computing mean and std 
+    # across entire dataset is time-consuming
+    model = FCN(input_shape=(seqlen,n_channels+feat_channels), max_seqlen=max_seqlen, num_classes=len(valid_sleep_states))
     print(model.summary())
     model.compile(optimizer=Adam(lr=lr), loss=focal_loss(),
                   metrics=['accuracy', macro_f1])
@@ -277,9 +247,9 @@ def main(argv):
     model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(fold+1)+'.h5'),\
                                                  monitor='val_macro_f1',\
                                                  mode='max', save_best_only=True)
-    history = model.fit_generator(train_gen, epochs=num_epochs, validation_data=val_gen,
-                                  verbose=True, #class_weight=class_wts, #steps_per_epoch=1000,
-                                  callbacks=[model_checkpt])#, workers=10, use_multiprocessing=True)
+    history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen,
+                                  verbose=1, shuffle=False, #class_weight=class_wts, #steps_per_epoch=1000,
+                                  callbacks=[model_checkpt], workers=2, max_queue_size=100, use_multiprocessing=True)
 
     # Plot training history
     plot_results(fold+1, history.history['loss'], history.history['val_loss'],\
@@ -291,7 +261,7 @@ def main(argv):
     
     # Predict probability on validation data using best model
     model.load_weights(os.path.join(resultdir,'best_model_fold'+str(fold+1)+'.h5'))
-    probs = model.predict_generator(test_gen)
+    probs = model.predict(test_gen)
     y_pred = probs.argmax(axis=1)
     y_true = test_labels
     predictions.append((test_users, y_true, y_pred))
