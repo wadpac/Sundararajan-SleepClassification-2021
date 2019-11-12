@@ -50,8 +50,9 @@ def save_user_report(pred_list, sleep_states, fname):
     y_true = [sleep_states[idx] for idx in y_true]
     y_pred = pred_list[i][2]
     y_pred = [sleep_states[idx] for idx in y_pred]
+    files = pred_list[i][3]
     fold = np.array([i+1]*len(users))
-    df = pd.DataFrame({'Fold':fold, 'Users':users, 'Y_true':y_true, 'Y_pred':y_pred})
+    df = pd.DataFrame({'Fold':fold, 'Users':users, 'Y_true':y_true, 'Y_pred':y_pred, 'Files':files})
     if i != 0:
       df.to_csv(fname, mode='a', header=False, index=False)
     else:
@@ -190,7 +191,7 @@ def main(argv):
   # Hyperparameters
   lr = 0.0005 # learning rate
   num_epochs = 30
-  batch_size = 128
+  batch_size = 64
   max_seqlen = 1504
   feat_channels = 3 # Add ENMO, z-angle and LIDS as additional channels
 
@@ -264,7 +265,7 @@ def main(argv):
     probs = model.predict(test_gen)
     y_pred = probs.argmax(axis=1)
     y_true = test_labels
-    predictions.append((test_users, y_true, y_pred))
+    predictions.append((test_users, y_true, y_pred, test_fnames))
 
     # Save user report
     if mode == 'binary':
