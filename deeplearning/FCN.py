@@ -36,21 +36,21 @@ def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
   # Main path
   x = Conv1D(filters=F1, kernel_size=1, strides=1, padding='valid',
              name=conv_base_name + '2a',
-             kernel_constraint=MaxNorm(3, axis=[0,1]), use_bias=False,
+             kernel_constraint=MaxNorm(1, axis=[0,1]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(inputs)
   x = LeakyReLU(alpha=0.1)(x)
   x = BatchNormalization(axis=-1, name=bn_base_name + '2a')(x)
 
   x = Conv1D(filters=F2, kernel_size=ksz, strides=1, padding='same',
              name=conv_base_name + '2b',
-             kernel_constraint=MaxNorm(3, axis=[0,1]), use_bias=False,
+             kernel_constraint=MaxNorm(1, axis=[0,1]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
   x = BatchNormalization(axis=-1, name=bn_base_name + '2b')(x)
 
   x = Conv1D(filters=F3, kernel_size=1, strides=1, padding='valid',
              name=conv_base_name + '2c',
-             kernel_constraint=MaxNorm(3, axis=[0,1]), use_bias=False,
+             kernel_constraint=MaxNorm(1, axis=[0,1]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
   x = BatchNormalization(axis=-1, name=bn_base_name + '2c')(x)
@@ -87,28 +87,28 @@ def conv_block(inputs, filters, ksz, stage, block, s=2, activation='relu'):
   x_shortcut = inputs
   x_shortcut = Conv1D(filters=F3, kernel_size=1, strides=s, padding='valid',
                       name=conv_base_name + '1',
-                      kernel_constraint=MaxNorm(3, axis=[0,1]), use_bias=False,
+                      kernel_constraint=MaxNorm(1, axis=[0,1]), use_bias=False,
                       kernel_initializer=glorot_uniform(seed=0))(x_shortcut)
   x_shortcut = BatchNormalization(axis=-1, name=bn_base_name + '1')(x_shortcut)
 
   # Main path
   x = Conv1D(filters=F1, kernel_size=1, strides=s, padding='valid',
              name=conv_base_name + '2a',
-             kernel_constraint=MaxNorm(3, axis=[0,1]), use_bias=False,
+             kernel_constraint=MaxNorm(1, axis=[0,1]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(inputs)
   x = LeakyReLU(alpha=0.1)(x)
   x = BatchNormalization(axis=-1, name=bn_base_name + '2a')(x)
 
   x = Conv1D(filters=F2, kernel_size=ksz, strides=1, padding='same',
              name=conv_base_name + '2b',
-             kernel_constraint=MaxNorm(3, axis=[0,1]), use_bias=False,
+             kernel_constraint=MaxNorm(1, axis=[0,1]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
   x = BatchNormalization(axis=-1, name=bn_base_name + '2b')(x)
 
   x = Conv1D(filters=F3, kernel_size=1, strides=1, padding='valid',
              name=conv_base_name + '2c',
-             kernel_constraint=MaxNorm(3, axis=[0,1]), use_bias=False,
+             kernel_constraint=MaxNorm(1, axis=[0,1]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
   x = BatchNormalization(axis=-1, name=bn_base_name + '2c')(x)
@@ -136,7 +136,7 @@ def Conv1DTranspose(inputs, filters, ksz, s=2, padding='same'):
   x = Lambda(lambda x: K.expand_dims(x, axis=2))(inputs)
   x = Conv2DTranspose(filters=filters, kernel_size=(ksz, 1), strides=(s, 1), padding=padding,
                       name='conv_transpose', use_bias=False,
-                      kernel_constraint=MaxNorm(3, axis=[0,1]),
+                      kernel_constraint=MaxNorm(1, axis=[0,1]),
                       kernel_initializer=glorot_uniform(seed=0))(x)
   x = Lambda(lambda x: K.squeeze(x, axis=2))(x)
   return x
@@ -162,11 +162,11 @@ def FCN(input_shape, max_seqlen, num_classes=2, activation='relu'):
   # Zero padding and input normalization
   pad_wd = (max_seqlen - input_shape[0])//2
   x = ZeroPadding1D(pad_wd)(inputs)
-  x = BatchNormalization()(x)
+  x = BatchNormalization(axis=0, name='bn_first')(x)
 
   # Stage 1
   x = Conv1D(filters=64, kernel_size=7, strides=2, padding='valid',
-             kernel_constraint=MaxNorm(3, axis=[0,1]), use_bias=False,
+             kernel_constraint=MaxNorm(1, axis=[0,1]), use_bias=False,
              name = 'conv1', kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
   x = BatchNormalization(axis=-1, name='bn_conv1')(x)
@@ -201,7 +201,7 @@ def FCN(input_shape, max_seqlen, num_classes=2, activation='relu'):
   x = Conv1DTranspose(x, filters=64, ksz=5, s=4)
   x = GlobalAveragePooling1D()(x)
   outputs = Dense(num_classes, activation='softmax',
-                  kernel_constraint=MaxNorm(3, axis=0), bias_constraint=MaxNorm(3),
+                  kernel_constraint=MaxNorm(1, axis=0), bias_constraint=MaxNorm(1),
                   kernel_initializer=glorot_uniform(seed=0))(x)
 
   model = Model(inputs=inputs, outputs=outputs)
