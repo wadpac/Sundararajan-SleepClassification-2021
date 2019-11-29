@@ -18,7 +18,7 @@ from FCN import FCN
 from datagenerator import DataGenerator
 from transforms import get_LIDS
 from metrics import macro_f1
-from metrics_callback import Metrics
+from callbacks import Metrics
 from losses import weighted_categorical_crossentropy, focal_loss
 
 from tqdm import tqdm
