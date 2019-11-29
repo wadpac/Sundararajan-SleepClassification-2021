@@ -18,6 +18,7 @@ from FCN import FCN
 from datagenerator import DataGenerator
 from transforms import get_LIDS
 from metrics import macro_f1
+from metrics_callback import Metrics
 from losses import weighted_categorical_crossentropy, focal_loss
 
 from tqdm import tqdm
@@ -123,7 +124,8 @@ def get_partition(files, labels, users, sel_users, sleep_states, is_train=False)
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
   labels = np.array([sleep_states.index(lbl) for lbl in labels])
-  indices = np.arange(len(users))[np.isin(users, sel_users)] #([i for i,user in enumerate(users) if user in sel_users])
+  indices = np.arange(len(users))[np.isin(users, sel_users)] 
+  #ind1 = np.array([i for i,user in enumerate(users) if user in sel_users])
   if is_train: # use extra wake samples only for training
     # Determine LIDS score of wake samples  
     wake_indices = indices[labels[indices] == wake_idx]
@@ -183,13 +185,13 @@ def main(argv):
   if mode == 'binary':
     labels = ['Sleep' if lbl in collate_sleep else lbl for lbl in labels]
 
-  early_stopping = EarlyStopping(monitor='val_macro_f1', mode='max', verbose=1, patience=2)
+  #early_stopping = EarlyStopping(monitor='val_macro_f1', mode='max', verbose=1, patience=2)
 
   seqlen, n_channels = np.load(files[0]).shape
   print(seqlen, n_channels)
 
   # Hyperparameters
-  lr = 0.0005 # learning rate
+  lr = 0.0001 # learning rate
   num_epochs = 30
   batch_size = 64
   max_seqlen = 1504
@@ -244,20 +246,22 @@ def main(argv):
                   metrics=['accuracy', macro_f1])
 
     # Train model
+    # Use callback to compute F-scores over entire validation data
+    metrics_cb = Metrics(val_data=val_gen, batch_size=batch_size)
     # Use early stopping and model checkpoints to handle overfitting and save best model
     model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(fold+1)+'.h5'),\
-                                                 monitor='val_macro_f1',\
+                                                 monitor='val_f1',\
                                                  mode='max', save_best_only=True)
-    history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen,
-                                  verbose=1, shuffle=False, #class_weight=class_wts, #steps_per_epoch=1000,
-                                  callbacks=[model_checkpt], workers=2, max_queue_size=100, use_multiprocessing=True)
-
+    history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
+                                  verbose=1, shuffle=False, callbacks=[metrics_cb, model_checkpt],
+                                  workers=2, max_queue_size=100, use_multiprocessing=True)
+ 
     # Plot training history
     plot_results(fold+1, history.history['loss'], history.history['val_loss'],\
                  os.path.join(resultdir,'Fold'+str(fold+1)+'_loss.jpg'), metric='Loss')
     plot_results(fold+1, history.history['accuracy'], history.history['val_accuracy'],\
                  os.path.join(resultdir,'Fold'+str(fold+1)+'_accuracy.jpg'), metric='Accuracy')
-    plot_results(fold+1, history.history['macro_f1'], history.history['val_macro_f1'],\
+    plot_results(fold+1, history.history['macro_f1'], metrics_cb.val_f1,\
                  os.path.join(resultdir,'Fold'+str(fold+1)+'_macro_f1.jpg'), metric='Macro F1')
     
     # Predict probability on validation data using best model
