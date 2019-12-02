@@ -8,7 +8,8 @@ from collections import Counter
 
 class DataGenerator(Sequence):
   def __init__(self, filenames, labels, classes, partition=None, batch_size=32, seqlen=100, n_channels=3,
-               n_classes=5, feat_channels=0, shuffle=False, augment=False, aug_factor=0.0, balance=False):
+               n_classes=5, feat_channels=0, shuffle=False, augment=False, aug_factor=0.0, balance=False,
+               mean=None, std=None):
     'Initialization'
     self.partition = partition
     self.seqlen = seqlen
@@ -26,6 +27,8 @@ class DataGenerator(Sequence):
     self.aug_func = [jitter, time_warp, rotation, rand_sampling]
     self.balance = balance
     self.feat_channels = feat_channels
+    self.mean = mean
+    self.std = std
     self.on_epoch_end()
 
   def __len__(self):
@@ -138,6 +141,10 @@ class DataGenerator(Sequence):
       LIDS = get_LIDS(X[:,:,0], X[:,:,1], X[:,:,2])[:,:,np.newaxis]
       X = np.concatenate((X, ENMO, angz, LIDS), axis=-1)
 
+    # Normalize data if mean and std are present
+    if self.mean is not None and self.std is not None:
+      X = (X - self.mean) / self.std
+
     return X, to_categorical(y, num_classes=self.n_classes)
   
   def on_epoch_end(self):
@@ -145,3 +152,20 @@ class DataGenerator(Sequence):
     self.indices = np.arange(len(self.filenames))
     if self.shuffle == True:
       np.random.shuffle(self.indices)
+
+  def fit(self, frac=1.0):
+    'Get mean and standard deviation for training data'
+    assert 'stat' in self.partition
+
+    samp_sum = np.zeros((self.seqlen, self.n_channels + self.feat_channels))
+    samp_sqsum = np.zeros((self.seqlen, self.n_channels + self.feat_channels))
+
+    N = int(frac*len(self)) # Get statistics using just a fraction of data
+    nsamp = N*self.batch_size
+    for i in tqdm(range(N)):
+      X,y = self[i]
+      samp_sum += X.sum(axis=0)
+      samp_sqsum += (X**2).sum(axis=0)
+    self.mean = samp_sum/nsamp
+    self.std = np.sqrt(samp_sqsum/nsamp - self.mean**2)
+    return self.mean, self.std

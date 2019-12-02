@@ -44,3 +44,28 @@ class Metrics(Callback):
     logs['val_f1'] = val_f1
 
     print(' - val_f1: {:0.4f}'.format(val_f1))
+
+class BatchRenormScheduler(Callback):
+  def __init__(self, renorm_momentum=0.99):
+    self.batch = 0
+    self.rmax = 1
+    self.dmax = 0
+
+  def on_train_begin(self, logs=None):
+    self.batch = 0
+    self.rmax = 1
+    self.dmax = 0
+
+  def on_train_batch_begin(self, batch, logs=None):
+    self.batch += 1
+    if self.batch % 5000 == 0: # Gradually relax batch renorm parameters
+      self.rmax += 0.25
+      self.dmax += 1
+    for layer in self.model.layers:
+      if layer.name.startswith('bn'):
+        if self.batch < 5000: # Batch normalization for first 5000 steps
+          layer.renorm = False
+        elif self.batch % 5000 == 0: # Update batch renorm parameters
+          layer.renorm = True
+          layer.renorm_clipping = {'rmin':1.0/min(3,self.rmax), 'rmax':min(3,self.rmax), 'dmax':min(5,self.dmax)}
+          layer.renorm_momentum = 0.99

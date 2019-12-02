@@ -18,7 +18,7 @@ from FCN import FCN
 from datagenerator import DataGenerator
 from transforms import get_LIDS
 from metrics import macro_f1
-from callbacks import Metrics
+from callbacks import Metrics, BatchRenormScheduler
 from losses import weighted_categorical_crossentropy, focal_loss
 
 from tqdm import tqdm
@@ -223,16 +223,22 @@ def main(argv):
             .format(len(train_fnames)*100.0/nsamples, len(val_fnames)*100.0/nsamples,\
                     len(test_fnames)*100.0/nsamples))
     
-    # Create data generators 
+    # Data generators for computing statistics
+    stat_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='stat',\
+                              batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
+                              n_classes=num_classes, shuffle=True)
+    mean, std = stat_gen.fit(frac=0.5)
+    # Data generators for train/val/test
     train_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='train',\
                               batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
-                              n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True)
+                              n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True,
+                              mean=mean, std=std)
     val_gen = DataGenerator(val_fnames, val_labels, valid_sleep_states, partition='val',\
                             batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
-                            n_classes=num_classes)
+                            n_classes=num_classes, mean=mean, std=std)
     test_gen = DataGenerator(test_fnames, test_labels, valid_sleep_states, partition='test',\
                              batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
-                             n_classes=num_classes)
+                             n_classes=num_classes, mean=mean, std=std)
 
     # Get class weights
     class_wts = class_weight.compute_class_weight('balanced', np.unique(train_labels), train_labels)
@@ -240,7 +246,8 @@ def main(argv):
     # Create model
     # Use batchnorm as first step since computing mean and std 
     # across entire dataset is time-consuming
-    model = FCN(input_shape=(seqlen,n_channels+feat_channels), max_seqlen=max_seqlen, num_classes=len(valid_sleep_states))
+    model = FCN(input_shape=(seqlen,n_channels+feat_channels), max_seqlen=max_seqlen,
+                num_classes=len(valid_sleep_states))
     print(model.summary())
     model.compile(optimizer=Adam(lr=lr), loss=focal_loss(),
                   metrics=['accuracy', macro_f1])
@@ -252,9 +259,10 @@ def main(argv):
     model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(fold+1)+'.h5'),\
                                                  monitor='val_f1',\
                                                  mode='max', save_best_only=True)
+    batch_renorm_cb = BatchRenormScheduler()
     history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
-                                  verbose=1, shuffle=False, callbacks=[metrics_cb, model_checkpt],
-                                  workers=2, max_queue_size=100, use_multiprocessing=True)
+                                  verbose=1, shuffle=False, callbacks=[metrics_cb, batch_renorm_cb, model_checkpt],
+                                  workers=2, max_queue_size=20, use_multiprocessing=True)
  
     # Plot training history
     plot_results(fold+1, history.history['loss'], history.history['val_loss'],\
