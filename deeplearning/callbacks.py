@@ -69,3 +69,7 @@ class BatchRenormScheduler(Callback):
           layer.renorm = True
           layer.renorm_clipping = {'rmin':1.0/min(3,self.rmax), 'rmax':min(3,self.rmax), 'dmax':min(5,self.dmax)}
           layer.renorm_momentum = 0.99
+  
+#  def on_train_batch_end(self, batch, logs=None):
+#    for layer in self.model.layers:
+#      print(layer.name, [(wt.shape, np.linalg.norm(wt)) for wt in layer.get_weights()])   

@@ -19,9 +19,10 @@ from datagenerator import DataGenerator
 from transforms import get_LIDS
 from metrics import macro_f1
 from callbacks import Metrics, BatchRenormScheduler
-from losses import weighted_categorical_crossentropy, focal_loss
+from losses import focal_loss
 
-from tqdm import tqdm
+sys.path.append('../analysis/')
+from analysis import cv_save_classification_result, cv_get_classification_report
 
 np.random.seed(2)
 
@@ -262,7 +263,7 @@ def main(argv):
     batch_renorm_cb = BatchRenormScheduler()
     history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
                                   verbose=1, shuffle=False, callbacks=[metrics_cb, batch_renorm_cb, model_checkpt],
-                                  workers=2, max_queue_size=20, use_multiprocessing=True)
+                                  workers=2, max_queue_size=20, use_multiprocessing=False)
  
     # Plot training history
     plot_results(fold+1, history.history['loss'], history.history['val_loss'],\
@@ -277,22 +278,26 @@ def main(argv):
     probs = model.predict(test_gen)
     y_pred = probs.argmax(axis=1)
     y_true = test_labels
-    predictions.append((test_users, y_true, y_pred, test_fnames))
+    predictions.append((test_users, test_fnames, y_true, probs))
 
     # Save user report
     if mode == 'binary':
-      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(fold+1)+'_deeplearning_binary_results.csv'))
+      cv_save_classification_result(predictions, valid_sleep_states, 
+                                    os.path.join(resultdir,'fold'+str(fold+1)+'_deeplearning_binary_results.csv'), method='dl')
     else:
-      save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'fold'+str(fold+1)+'_deeplearning_multiclass_results.csv'))
-    get_classification_report(predictions, mode, valid_sleep_states)
+      cv_save_classification_result(predictions, valid_sleep_states, 
+                                    os.path.join(resultdir,'fold'+str(fold+1)+'_deeplearning_multiclass_results.csv'), method='dl')
+    cv_get_classification_report(predictions, mode, valid_sleep_states, method='dl')
   
-  get_classification_report(predictions, mode, valid_sleep_states)
+  cv_get_classification_report(predictions, mode, valid_sleep_states, method='dl')
 
   # Save user report
   if mode == 'binary':
-    save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'deeplearning_binary_results.csv'))
+    cv_save_classification_result(predictions, valid_sleep_states,
+                                  os.path.join(resultdir,'deeplearning_binary_results.csv'), method='dl')
   else:
-    save_user_report(predictions, valid_sleep_states, os.path.join(resultdir,'deeplearning_multiclass_results.csv'))
+    cv_save_classification_result(predictions, valid_sleep_states,
+                                  os.path.join(resultdir,'deeplearning_multiclass_results.csv'), method='dl')
 
 if __name__ == "__main__":
   main(sys.argv[1:])
