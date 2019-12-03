@@ -3,18 +3,28 @@ import pandas as pd
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score,\
                             classification_report, confusion_matrix
 
-def cv_save_classification_result(pred_list, sleep_states, fname):
+def cv_save_classification_result(pred_list, sleep_states, fname, method='feat_eng'):
+  # method is feature engineering (feat_eng) or deep learning (dl)
   nfolds = len(pred_list)
   for i in range(nfolds):
-    users = pred_list[i][0]
-    timestamp = pred_list[i][1]
-    fnames = pred_list[i][2]
-    y_true = pred_list[i][3]
+    if method == 'feat_eng': # Feature engineering 
+      users = pred_list[i][0]
+      timestamp = pred_list[i][1]
+      fnames = pred_list[i][2]
+      y_true = pred_list[i][3]
+      y_pred = pred_list[i][4] # class probabilities
+    else: # Deep learning
+      users = pred_list[i][0]
+      fnames = pred_list[i][1]
+      y_true = pred_list[i][2]
+      y_pred = pred_list[i][3] # class probabilities
     y_true_onehot = np.zeros((y_true.shape[0], len(sleep_states))) # convert to one-hot representation  
     y_true_onehot[np.arange(y_true.shape[0]), y_true] = 1
-    y_pred = pred_list[i][4] # class probabilities
     fold = np.array([i+1]*users.shape[0])
-    df = pd.DataFrame({'Fold':fold, 'Users':users, 'Timestamp':timestamp, 'Filenames':fnames}).reset_index(drop=True)
+    if method == 'feat_eng':
+      df = pd.DataFrame({'Fold':fold, 'Users':users, 'Timestamp':timestamp, 'Filenames':fnames}).reset_index(drop=True)
+    else:  
+      df = pd.DataFrame({'Fold':fold, 'Users':users, 'Filenames':fnames}).reset_index(drop=True)
     true_cols = ['true_'+state for state in sleep_states]
     df_y_true = pd.DataFrame(y_true_onehot, columns=true_cols)
     pred_cols = ['pred_'+state for state in sleep_states]
@@ -43,7 +53,9 @@ def cv_get_feat_importances(fname):
   for i in range(mean_importances.shape[0]):
     print('%d. %s: %0.4f' % (i+1,feature_names[indices[i]],mean_importances[indices[i]]))
  
-def cv_get_classification_report(pred_list, mode, sleep_states):
+def cv_get_classification_report(pred_list, mode, sleep_states, method='feat_eng'):
+  # method is feature engineering (feat_eng) or deep learning (dl)
+  nfolds = len(pred_list)
   nfolds = len(pred_list)
   precision = 0.0; recall = 0.0; fscore = 0.0; accuracy = 0.0
   class_metrics = {}
@@ -52,8 +64,13 @@ def cv_get_classification_report(pred_list, mode, sleep_states):
   confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
   sleep_labels = [idx for idx,state in enumerate(sleep_states)]
   for i in range(nfolds):
-    y_true = pred_list[i][2]
-    y_pred = pred_list[i][3]
+    if method == 'feat_eng':  
+      y_true = pred_list[i][3]
+      probs = pred_list[i][4]
+    else:
+      y_true = pred_list[i][2]
+      probs = pred_list[i][3]
+    y_pred = probs.argmax(axis=1)
     # Get metrics across all classes
     prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred,
                                                           average='macro')
