@@ -20,7 +20,7 @@ def cv_save_classification_result(pred_list, sleep_states, fname, method='feat_e
       y_pred = pred_list[i][3] # class probabilities
     y_true_onehot = np.zeros((y_true.shape[0], len(sleep_states))) # convert to one-hot representation  
     y_true_onehot[np.arange(y_true.shape[0]), y_true] = 1
-    fold = np.array([i+1]*users.shape[0])
+    fold = np.array([i+1]*y_true.shape[0])
     if method == 'feat_eng':
       df = pd.DataFrame({'Fold':fold, 'Users':users, 'Timestamp':timestamp, 'Filenames':fnames}).reset_index(drop=True)
     else:  
