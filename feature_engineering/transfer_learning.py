@@ -9,6 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
+from sklearn.model_selection import GroupKFold
 from imblearn.over_sampling import SMOTE
 
 sys.path.append('../analysis/')
@@ -56,39 +57,52 @@ def main(args):
       predictions.append((users_test, ts_test, fnames_test, y_test, y_pred))
       feat_imp.append(clf.best_estimator_.feature_importances_)
   else:
+    resultdir = os.path.join(args.outdir, 'models', 'tranfer', args.mode)
+    if not os.path.exists(resultdir):
+      os.makedirs(resultdir)
     # 'finetune'- use models tuned using validation data from same distribution as test data
-    X_train, y_train, _, _, _ = get_data(args.train, feat_cols, sleep_states, mode=args.mode)
+    X_train, y_train, users_train, _, _ = get_data(args.train, feat_cols, sleep_states, mode=args.mode)
     X_val, y_val, _, _, _ = get_data(args.val, feat_cols, sleep_states, mode=args.mode)
 
-    # Scale features
-    scaler = StandardScaler()
-    scaler.fit(X_train)
-    X_train_sc = scaler.transform(X_train)
-    X_val_sc = scaler.transform(X_val)
-    X_test_sc = scaler.transform(X_test)
+    outer_cv_splits = 5; inner_cv_splits = 5
+    group_kfold = GroupKFold(n_splits=outer_cv_splits)
+    fold = 0
+    for train_indices, test_indices in group_kfold.split(X_train, y_train, users_train):
+      fold += 1
+      fold_X_train = X_train[train_indices,:]
+      fold_y_train = y_train[train_indices]
+  
+      # Scale features
+      scaler = StandardScaler()
+      scaler.fit(fold_X_train)
+      X_train_sc = scaler.transform(fold_X_train)
+      X_val_sc = scaler.transform(X_val)
+      X_test_sc = scaler.transform(X_test)
 
-    # Balance training samples using SMOTE
-    smote = SMOTE(random_state=0, n_jobs=-1, sampling_strategy='all')
-    X_train_resamp, y_train_resamp = smote.fit_resample(X_train_sc, y_train)
-    X_concat = np.concatenate((X_train_resamp, X_val_sc), axis=0)
-    y_concat = np.concatenate((y_train_resamp, y_val), axis=0)
+      # Balance training samples using SMOTE
+      smote = SMOTE(random_state=0, n_jobs=-1, sampling_strategy='all')
+      X_train_resamp, y_train_resamp = smote.fit_resample(X_train_sc, fold_y_train)
+      X_concat = np.concatenate((X_train_resamp, X_val_sc), axis=0)
+      y_concat = np.concatenate((y_train_resamp, y_val), axis=0)
+      print(X_concat.shape, y_concat.shape)
 
-    # Get suitable parameters using validation data
-    clf = RandomForestClassifier(class_weight='balanced',
+      # Get suitable parameters using validation data
+      clf = RandomForestClassifier(class_weight='balanced',
                              max_depth=None, random_state=0)
-    search_params = {'n_estimators':[50,100,200,300,500],
+      search_params = {'n_estimators':[50,100,200,300,500],
                  'max_depth': [5,10,None]}
-    cv_indices = [(range(X_train_sc.shape[0]), range(X_train_sc.shape[0], X_concat.shape[0]))]
-    cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params,
+      cv_indices = [(np.arange(X_train_resamp.shape[0]), np.arange(X_train_resamp.shape[0], X_concat.shape[0]))]
+      print(cv_indices)
+      cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params,
                             cv=cv_indices, scoring='f1_macro',
-                            n_iter=10, n_jobs=-1, verbose=2)
-    cv_clf.fit(X_concat, y_concat)
-    pickle.dump(cv_clf, open(os.path.join(args.outdir, 'models',
-                'transfer_' + args.mode +'_'+ args.testmode + '_RF.sav'),'wb'))
-    y_pred = cv_clf.predict_proba(X_test_sc)
+                            n_iter=5, n_jobs=-1, verbose=2)
+      cv_clf.fit(X_concat, y_concat)
+      pickle.dump(cv_clf, open(os.path.join(resultdir, 
+                  'fold_' + str(fold) + '_' +  args.testmode + '_RF.sav'),'wb'))
+      y_pred = cv_clf.predict_proba(X_test_sc)
 
-    predictions.append((users_test, ts_test, fnames_test, y_test, y_pred))
-    feat_imp.append(cv_clf.best_estimator_.feature_importances_)
+      predictions.append((users_test, ts_test, fnames_test, y_test, y_pred))
+      feat_imp.append(cv_clf.best_estimator_.feature_importances_)
 
   cv_save_feat_importances_result(feat_imp, feat_cols,
                    os.path.join(args.outdir, 'transfer_' + args.mode + '_' + args.testmode + '_feat_imp.csv'))
