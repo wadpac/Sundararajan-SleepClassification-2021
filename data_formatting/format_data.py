@@ -176,6 +176,7 @@ def process_file(fname, time_interval, sleep_states, dataset, num_timesteps):
   
   # Get nonwear for each interval
   nonwear = np.array(fh['Nonwear'])
+  nonwear_agg = get_dominant_categ(timestamp, nonwear, time_interval)
   
   # Standardize label names for all datasets
   # Get label for each interval
@@ -203,7 +204,7 @@ def process_file(fname, time_interval, sleep_states, dataset, num_timesteps):
   timestamp_agg, LIDS_stats = get_stats(timestamp, LIDS, time_interval)
   feat = np.hstack((ENMO_stats, angle_z_stats, LIDS_stats))
   
-  # Get valid timestamps, features and labels
+  # Get valid timestamps, features
   timestamp_valid = timestamp_agg[label_agg.isin(sleep_states)].reshape(-1,1)
   feat_valid = feat[label_agg.isin(sleep_states),:]
   
@@ -238,16 +239,17 @@ def process_file(fname, time_interval, sleep_states, dataset, num_timesteps):
   # Resample raw data to desired number of timesteps
   raw_data = resample_timeslices(raw_data, num_timesteps)
 
+  nonwear_valid = nonwear_agg[label_agg.isin(sleep_states)].values
   label_valid = label_agg[label_agg.isin(sleep_states)].values
   
   # Write features to CSV file
-  data = np.hstack((timestamp_valid.reshape(-1,1), feat_valid, label_valid.reshape(-1,1)))
+  data = np.hstack((timestamp_valid.reshape(-1,1), feat_valid, label_valid.reshape(-1,1), nonwear_valid.reshape(-1,1)))
   cols = ['timestamp','ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad',
           'ENMO_entropy1','ENMO_entropy2','ENMO_prevdiff','ENMO_nextdiff', 
           'angz_mean','angz_std','angz_min','angz_max','angz_mad',
           'angz_entropy1','angz_entropy2','angz_prevdiff','angz_nextdiff', 
           'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad',
-          'LIDS_entropy1','LIDS_entropy2','LIDS_prevdiff','LIDS_nextdiff','label']
+          'LIDS_entropy1','LIDS_entropy2','LIDS_prevdiff','LIDS_nextdiff','label','nonwear']
   df = pd.DataFrame(data=data, columns=cols)
   
   if dataset == 'Newcastle':
@@ -281,7 +283,7 @@ def main(argv):
     os.makedirs(outdir)
   
   # Sleep states
-  sleep_states = ['Wake','NREM 1','NREM 2','NREM 3','REM','Nonwear']
+  sleep_states = ['Wake','NREM 1','NREM 2','NREM 3','REM','Nonwear','Wake_ext']
  
   num_samples = get_rawdata_shape(indir, time_interval, sleep_states)
   num_channels = 6
