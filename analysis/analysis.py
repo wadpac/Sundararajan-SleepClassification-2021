@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from collections import Counter
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score,\
                             classification_report, confusion_matrix,\
                             roc_auc_score, average_precision_score
@@ -131,48 +132,65 @@ def cv_get_classification_report(pred_list, mode, sleep_states, method='feat_eng
 def cv_classification_report(infile, mode='binary'):
   df = pd.read_csv(infile)
   
-  sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
+  sleep_states = [col.split('_')[1] for col in df.columns if (col.startswith('true')) and (not col.endswith('Nonwear'))]
   sleep_labels = [idx for idx,state in enumerate(sleep_states)]
-  true_cols = [col for col in df.columns if col.startswith('true')]
-  pred_cols = [col for col in df.columns if col.startswith('pred')]
+  true_cols = ['true_'+state for state in sleep_states]
+  pred_cols = ['smooth_'+state for state in sleep_states]
   nclasses = len(true_cols)
   nfolds = len(set(df['Fold']))
   
-  metrics = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'accuracy':0.0, 'AUC':0.0}
+  metrics = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'accuracy':0.0, 'AUC':0.0, 'AP':0.0}
   class_metrics = {}
-  for state in sleep_states:
-    class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'AUC':0.0, 'AP':0.0}
-  confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
-  for fold in range(nfolds):
-    true_prob = df[df['Fold'] == fold+1][true_cols].values  
+  for state in (sleep_states + ['Nonwear']):
+    class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'AUC':0.0, 'AP':0.0, 'samples':0.0}
+  
+  for fold in range(nfolds):  
+    # Get overall scores excluding nonwear
+    true_prob = df[df['Fold'] == fold+1][true_cols].values
+    valid_indices = true_prob.sum(axis=1) > 0
+    true_prob = true_prob[valid_indices]
     y_true = true_prob.argmax(axis=1)
-    pred_prob = df[df['Fold'] == fold+1][pred_cols].values 
+    pred_prob = df[df['Fold'] == fold+1][pred_cols].values[valid_indices]
+    pred_prob = pred_prob/pred_prob.sum(axis=1).reshape(-1,1)
+    pred_prob[np.isnan(pred_prob)] = 1.0/nclasses
     y_pred = pred_prob.argmax(axis=1)
-    prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred,
-                                                          average='macro')
+    prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred, average='macro')
     acc = accuracy_score(y_true, y_pred)
-    auc = roc_auc_score(y_true, pred_prob, multi_class='ovr')
-    #ap = average_precision_score(y_true, pred_prob)
+    auc = roc_auc_score(true_prob, pred_prob, average='macro', multi_class='ovr')
+    ap = average_precision_score(true_prob, pred_prob, average='macro')
     metrics['precision'] += prec; metrics['recall'] += rec
     metrics['f1-score'] += fsc; metrics['accuracy'] += acc
     metrics['AUC'] += auc
+    metrics['AP'] += ap
 
-    # Get metrics per class
+    # Get metrics per class except Nonwear
     fold_class_metrics = classification_report(y_true, y_pred, labels=sleep_labels,
                                    target_names=sleep_states, output_dict=True)
     for idx,state in enumerate(sleep_states):
       class_metrics[state]['precision'] += fold_class_metrics[state]['precision']
       class_metrics[state]['recall'] += fold_class_metrics[state]['recall']
       class_metrics[state]['f1-score'] += fold_class_metrics[state]['f1-score']
+      class_metrics[state]['samples'] += fold_class_metrics[state]['support']
       auc = roc_auc_score(true_prob[:,idx], pred_prob[:,idx])
       class_metrics[state]['AUC'] += auc
       ap = average_precision_score(true_prob[:,idx], pred_prob[:,idx])
       class_metrics[state]['AP'] += ap
-    # Get confusion matrix
-    fold_conf_mat = confusion_matrix(y_true, y_pred, labels=sleep_labels).astype(np.float)
-    for idx,state in enumerate(sleep_states):
-      fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == sleep_labels[idx]]))
-    confusion_mat = confusion_mat + fold_conf_mat
+ 
+    # Get metrics for Nonwear
+    true_prob = df[df['Fold'] == fold+1]['true_Nonwear'].values 
+    pred_prob = 1.0 - df[df['Fold'] == fold+1][pred_cols].values.sum(axis=1)
+    test_prob = pred_prob[true_prob > 0]
+    thresh = 1.0/(nclasses+1)
+    y_pred = pred_prob > thresh
+    fold_class_metrics = classification_report(true_prob, y_pred, labels=[0,1], output_dict=True)
+    class_metrics['Nonwear']['precision'] += fold_class_metrics['1']['precision']
+    class_metrics['Nonwear']['recall'] += fold_class_metrics['1']['recall']
+    class_metrics['Nonwear']['f1-score'] += fold_class_metrics['1']['f1-score']
+    class_metrics['Nonwear']['samples'] += fold_class_metrics['1']['support']
+    auc = roc_auc_score(true_prob, pred_prob)
+    class_metrics['Nonwear']['AUC'] += auc
+    ap = average_precision_score(true_prob, pred_prob)
+    class_metrics['Nonwear']['AP'] += ap
 
   # Average metrics across all folds
   for key in metrics.keys():
@@ -180,22 +198,40 @@ def cv_classification_report(infile, mode='binary'):
     print('{} = {:0.4f}'.format(key, metrics[key]))
 
   # Classwise report
-  print('\nClass\t\tPrecision\tRecall\t\tF1-score\tAUC\t\tAP')
+  sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
+  print('\nClass\t\tPrecision\tRecall\t\tF1-score\tAUC\t\tAP\t\tSamples')
   for state in sleep_states:
     class_metrics[state]['precision'] = class_metrics[state]['precision'] / nfolds
     class_metrics[state]['recall'] = class_metrics[state]['recall'] / nfolds
     class_metrics[state]['f1-score'] = class_metrics[state]['f1-score'] / nfolds
     class_metrics[state]['AUC'] = class_metrics[state]['AUC'] / nfolds
     class_metrics[state]['AP'] = class_metrics[state]['AP'] / nfolds
-    print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%0.4f' % 
+    print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%d' % 
                       (state, class_metrics[state]['precision'],
                       class_metrics[state]['recall'], 
                       class_metrics[state]['f1-score'],
                       class_metrics[state]['AUC'],
-                      class_metrics[state]['AP']))
+                      class_metrics[state]['AP'],
+                      class_metrics[state]['samples']))
   print('\n')
+  
+  ################################ Confusion matrix ##################################
+  sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
+  sleep_labels = [idx for idx,state in enumerate(sleep_states)]
+  true_cols = [col for col in df.columns if col.startswith('true')]
+  pred_cols = [col for col in df.columns if col.startswith('smooth')]
+  nclasses = len(true_cols)
+  confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
+  for fold in range(nfolds):
+    true_prob = df[df['Fold'] == fold+1][true_cols].values  
+    y_true = true_prob.argmax(axis=1)
+    pred_prob = df[df['Fold'] == fold+1][pred_cols].values 
+    y_pred = pred_prob.argmax(axis=1)
+    fold_conf_mat = confusion_matrix(y_true, y_pred, labels=sleep_labels).astype(np.float)
+    for idx,state in enumerate(sleep_states):
+      fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == sleep_labels[idx]]))
+    confusion_mat = confusion_mat + fold_conf_mat
 
-  # Confusion matrix
   confusion_mat = confusion_mat / nfolds
   if mode == 'binary':
     print('ConfMat\tWake\tSleep\tNonwear\n')
@@ -212,4 +248,3 @@ def cv_classification_report(infile, mode='binary'):
 	        confusion_mat[i][2], confusion_mat[i][3],
                 confusion_mat[i][4], confusion_mat[i][5]))
     print('\n')
-
