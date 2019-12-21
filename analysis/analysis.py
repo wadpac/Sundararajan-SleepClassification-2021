@@ -17,16 +17,19 @@ def cv_save_classification_result(pred_list, sleep_states, fname, method='feat_e
       y_pred = pred_list[i][4] # class probabilities
     else: # Deep learning
       users = pred_list[i][0]
-      fnames = pred_list[i][1]
-      y_true = pred_list[i][2]
-      y_pred = pred_list[i][3] # class probabilities
+      timestamp = pred_list[i][1]
+      fnames = pred_list[i][2]
+      indices = pred_list[i][3]
+      y_true = pred_list[i][4]
+      y_pred = pred_list[i][5] # class probabilities
     y_true_onehot = np.zeros((y_true.shape[0], len(sleep_states))) # convert to one-hot representation  
     y_true_onehot[np.arange(y_true.shape[0]), y_true] = 1
     fold = np.array([i+1]*y_true.shape[0])
     if method == 'feat_eng':
       df = pd.DataFrame({'Fold':fold, 'Users':users, 'Timestamp':timestamp, 'Filenames':fnames}).reset_index(drop=True)
     else:  
-      df = pd.DataFrame({'Fold':fold, 'Users':users, 'Filenames':fnames}).reset_index(drop=True)
+      df = pd.DataFrame({'Fold':fold, 'Users':users, 'Timestamp':timestamp, 'Filenames':fnames,
+                         'Indices':indices}).reset_index(drop=True)
     true_cols = ['true_'+state for state in sleep_states]
     df_y_true = pd.DataFrame(y_true_onehot, columns=true_cols)
     pred_cols = ['pred_'+state for state in sleep_states]
