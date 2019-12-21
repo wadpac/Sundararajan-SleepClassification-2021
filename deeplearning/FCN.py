@@ -39,7 +39,7 @@ def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
              kernel_constraint=UnitNorm(axis=[0,1,2]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(inputs)
   x = LeakyReLU(alpha=0.1)(x)
-  x = BatchNormalization(axis=-1, name=bn_base_name + '2a',
+  x = BatchNormalization(axis=-1, momentum=0.9, name=bn_base_name + '2a',
                          gamma_constraint=UnitNorm(axis=0), beta_constraint=UnitNorm(axis=0))(x)
 
   x = Conv1D(filters=F2, kernel_size=ksz, strides=1, padding='same',
@@ -47,7 +47,7 @@ def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
              kernel_constraint=UnitNorm(axis=[0,1,2]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
-  x = BatchNormalization(axis=-1, name=bn_base_name + '2b',
+  x = BatchNormalization(axis=-1, momentum=0.9, name=bn_base_name + '2b',
                          gamma_constraint=UnitNorm(axis=0), beta_constraint=UnitNorm(axis=0))(x)
 
   x = Conv1D(filters=F3, kernel_size=1, strides=1, padding='valid',
@@ -55,7 +55,7 @@ def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
              kernel_constraint=UnitNorm(axis=[0,1,2]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
-  x = BatchNormalization(axis=-1, name=bn_base_name + '2c',
+  x = BatchNormalization(axis=-1, momentum=0.9, name=bn_base_name + '2c',
                          gamma_constraint=UnitNorm(axis=0), beta_constraint=UnitNorm(axis=0))(x)
 
   x = Add()([x, x_shortcut])
@@ -92,7 +92,7 @@ def conv_block(inputs, filters, ksz, stage, block, s=2, activation='relu'):
                       name=conv_base_name + '1',
                       kernel_constraint=UnitNorm(axis=[0,1,2]), use_bias=False,
                       kernel_initializer=glorot_uniform(seed=0))(x_shortcut)
-  x_shortcut = BatchNormalization(axis=-1, name=bn_base_name + '1',
+  x_shortcut = BatchNormalization(axis=-1, momentum=0.9, name=bn_base_name + '1',
                                   gamma_constraint=UnitNorm(axis=0), beta_constraint=UnitNorm(axis=0))(x_shortcut)
 
   # Main path
@@ -101,7 +101,7 @@ def conv_block(inputs, filters, ksz, stage, block, s=2, activation='relu'):
              kernel_constraint=UnitNorm(axis=[0,1,2]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(inputs)
   x = LeakyReLU(alpha=0.1)(x)
-  x = BatchNormalization(axis=-1, name=bn_base_name + '2a',
+  x = BatchNormalization(axis=-1, momentum=0.9, name=bn_base_name + '2a',
                          gamma_constraint=UnitNorm(axis=0), beta_constraint=UnitNorm(axis=0))(x)
 
   x = Conv1D(filters=F2, kernel_size=ksz, strides=1, padding='same',
@@ -109,7 +109,7 @@ def conv_block(inputs, filters, ksz, stage, block, s=2, activation='relu'):
              kernel_constraint=UnitNorm(axis=[0,1,2]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
-  x = BatchNormalization(axis=-1, name=bn_base_name + '2b',
+  x = BatchNormalization(axis=-1, momentum=0.9, name=bn_base_name + '2b',
                          gamma_constraint=UnitNorm(axis=0), beta_constraint=UnitNorm(axis=0))(x)
 
   x = Conv1D(filters=F3, kernel_size=1, strides=1, padding='valid',
@@ -117,7 +117,7 @@ def conv_block(inputs, filters, ksz, stage, block, s=2, activation='relu'):
              kernel_constraint=UnitNorm(axis=[0,1,2]), use_bias=False,
              kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
-  x = BatchNormalization(axis=-1, name=bn_base_name + '2c',
+  x = BatchNormalization(axis=-1, momentum=0.9, name=bn_base_name + '2c',
                          gamma_constraint=UnitNorm(axis=0), beta_constraint=UnitNorm(axis=0))(x)
 
   x = Add()([x, x_shortcut])
@@ -168,20 +168,21 @@ def FCN(input_shape, max_seqlen, num_classes=2, activation='relu'):
 
   # Zero padding
   pad_wd = (max_seqlen - input_shape[0])//2
-  x = ZeroPadding1D(pad_wd)(inputs)
+  x = ZeroPadding1D((pad_wd,pad_wd))(inputs)
 
   # Stage 1
   x = Conv1D(filters=32, kernel_size=7, strides=2, padding='valid',
              kernel_constraint=UnitNorm(axis=[0,1,2]), use_bias=False,
              name = 'conv1', kernel_initializer=glorot_uniform(seed=0))(x)
   x = LeakyReLU(alpha=0.1)(x)
-  x = BatchNormalization(axis=-1, name='bn_conv1',
+  x = BatchNormalization(axis=-1, momentum=0.9, name='bn_conv1',
                          gamma_constraint=UnitNorm(axis=0), beta_constraint=UnitNorm(axis=0))(x)
 
   # Stage 2
   x = conv_block(x, ksz=3, filters=[16,16,32], stage=2, block='a', s=2)
   x = identity_block(x, ksz=3, filters=[16,16,32], stage=2, block='b')
   x = identity_block(x, ksz=3, filters=[16,16,32], stage=2, block='c')
+  # Upto stage 2 for binary classification
 
 #  # Stage 3
 #  x = conv_block(x, ksz=3, filters=[64,64,128], stage=3, block='a', s=2)

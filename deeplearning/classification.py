@@ -2,6 +2,7 @@ import sys,os
 import numpy as np
 import pandas as pd
 import random
+import argparse
 from collections import Counter
 
 import tensorflow as tf
@@ -44,121 +45,29 @@ def plot_results(fold, train_result, val_result, out_fname, metric='Loss'):
   plt.savefig(out_fname)
   plt.clf()
 
-def save_user_report(pred_list, sleep_states, fname):
-  nfolds = len(pred_list)
-  for i in range(nfolds):
-    users = pred_list[i][0]
-    y_true = pred_list[i][1]
-    y_true = [sleep_states[idx] for idx in y_true]
-    y_pred = pred_list[i][2]
-    y_pred = [sleep_states[idx] for idx in y_pred]
-    files = pred_list[i][3]
-    fold = np.array([i+1]*len(users))
-    df = pd.DataFrame({'Fold':fold, 'Users':users, 'Y_true':y_true, 'Y_pred':y_pred, 'Files':files})
-    if i != 0:
-      df.to_csv(fname, mode='a', header=False, index=False)
-    else:
-      df.to_csv(fname, mode='w', header=True, index=False)
-
-def get_classification_report(pred_list, mode, sleep_states):
-  nfolds = len(pred_list)
-  precision = 0.0; recall = 0.0; fscore = 0.0; accuracy = 0.0
-  class_metrics = {}
-  sleep_labels = [idx for idx,state in enumerate(sleep_states)]
-  for state in sleep_states:
-    class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0}
-  confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
-  for i in range(nfolds):
-    y_true = pred_list[i][1]
-    y_pred = pred_list[i][2]
-    # Get metrics across all classes
-    prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred, average='macro')
-    acc = accuracy_score(y_true, y_pred)
-    precision += prec; recall += rec; fscore += fsc; accuracy += acc
-    # Get metrics per class
-    fold_class_metrics = classification_report(y_true, y_pred, labels=sleep_labels,
-                                          target_names=sleep_states, output_dict=True)
-    for state in sleep_states:
-      class_metrics[state]['precision'] += fold_class_metrics[state]['precision']
-      class_metrics[state]['recall'] += fold_class_metrics[state]['recall']
-      class_metrics[state]['f1-score'] += fold_class_metrics[state]['f1-score']
-    # Get confusion matrix
-    fold_conf_mat = confusion_matrix(y_true, y_pred, labels=sleep_labels).astype(np.float)
-    for idx in range(len(sleep_states)):
-      fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == idx]))
-    confusion_mat = confusion_mat + fold_conf_mat
-
-  # Average metrics across all folds
-  precision = precision/nfolds; recall = recall/nfolds
-  fscore = fscore/nfolds; accuracy = accuracy/nfolds
-  print('\nPrecision = %0.4f' % (precision*100.0))
-  print('Recall = %0.4f' % (recall*100.0))
-  print('F-score = %0.4f' % (fscore*100.0))
-  print('Accuracy = %0.4f' % (accuracy*100.0))
-
-  # Classwise report
-  print('\nClass\t\tPrecision\tRecall\t\tF1-score')
-  for state in sleep_states:
-    class_metrics[state]['precision'] = class_metrics[state]['precision'] / nfolds
-    class_metrics[state]['recall'] = class_metrics[state]['recall'] / nfolds
-    class_metrics[state]['f1-score'] = class_metrics[state]['f1-score'] / nfolds
-    print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f' % (state, class_metrics[state]['precision'], \
-                      class_metrics[state]['recall'], class_metrics[state]['f1-score']))
-  print('\n')
-
-  # Confusion matrix
-  confusion_mat = confusion_mat / nfolds
-  if mode == 'multiclass':
-    print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\tNonwear\n')
-    for i in range(len(sleep_states)):
-      print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0],\
-              confusion_mat[i][1], confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
-    print('\n')
-  else:
-    print('ConfMat\tWake\tSleep\tNonwear\n')
-    for i in range(len(sleep_states)):
-      print('%s\t%0.4f\t%0.4f\t%0.4f' % (sleep_states[i], confusion_mat[i][0],\
-              confusion_mat[i][1], confusion_mat[i][2]))
-    print('\n')
-
-def get_partition(files, labels, users, sel_users, sleep_states, is_train=False):
+def get_partition(data, labels, users, sel_users, sleep_states, is_train=False):
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
-  labels = np.array([sleep_states.index(lbl) for lbl in labels])
   indices = np.arange(len(users))[np.isin(users, sel_users)] 
-  #ind1 = np.array([i for i,user in enumerate(users) if user in sel_users])
   if is_train: # use extra wake samples only for training
     # Determine LIDS score of wake samples  
     wake_indices = indices[labels[indices] == wake_idx]
-    wake_samp = np.zeros((len(wake_indices), 1))
-    for i,index in enumerate(wake_indices):
-      samp = np.load(files[index])
-      lids = get_LIDS(samp[:,0], samp[:,1], samp[:,2])
-      wake_samp[i] = lids.mean()
+    wake_samp = data[wake_indices,:,5].mean(axis=1) # LIDS mean
     wake_perc = np.percentile(wake_samp,50)
     # Choose extra wake samples whose LIDS score is less than 50% percentile of LIDS score of wake samples
     wake_ext_indices = indices[labels[indices] == wake_ext_idx]
-    valid_indices = []
-    for i,index in enumerate(wake_ext_indices):
-      samp = np.load(files[index])
-      lids = get_LIDS(samp[:,0], samp[:,1], samp[:,2])
-      if lids.mean() < wake_perc:
-        valid_indices.append(index)
+    wake_ext_samp = data[wake_ext_indices,:,5].mean(axis=1) # LIDS mean
+    valid_indices = wake_ext_indices[wake_ext_samp < wake_perc]
     indices = np.concatenate((indices[labels[indices] != wake_ext_idx], np.array(valid_indices)))
   else:
     indices = indices[labels[indices] != wake_ext_idx]
-  part_files = np.array(files)[indices]
-  part_labels = labels[indices]
-  part_users = [users[i] for i in indices]
-  if is_train: # relabel extra wake samples as wake for training
-    part_labels[part_labels == wake_ext_idx] = wake_idx
   
-  return part_files, part_labels, part_users
+  return indices
 
 def main(argv):
-  indir = argv[0]
-  mode = argv[1] # binary or multiclass
-  outdir = argv[2]
+  indir = args.indir
+  mode = args.mode # binary or multiclass
+  outdir = args.outdir
 
   if mode == 'multiclass':
     sleep_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM', 'Nonwear', 'Wake_ext']
@@ -177,26 +86,28 @@ def main(argv):
     os.makedirs(resultdir)
 
   # Read data from disk
-  data = pd.read_csv(os.path.join(indir,'labels.txt'), sep='\t')
-  files = []; labels = []; users = []
-  for idx, row in data.iterrows():
-    files.append(os.path.join(indir, row['filename']) + '.npy')
-    labels.append(row['labels'])
-    users.append(row['user'])
+  data = pd.read_csv(os.path.join(indir,'features_30.0s.csv'))
+  labels = data['label'].values
+  users = data['user'].values
   if mode == 'binary':
     labels = ['Sleep' if lbl in collate_sleep else lbl for lbl in labels]
 
+  # Read raw data
+  shape_df = pd.read_csv(os.path.join(indir,'datashape_30.0s.csv'))
+  num_samples = shape_df['num_samples'].values[0]
+  seqlen = shape_df['num_timesteps'].values[0]
+  n_channels = shape_df['num_channels'].values[0]
+  raw_data = np.memmap(os.path.join(indir,'rawdata_30.0s.npz'), dtype='float32', mode='r', shape=(num_samples, seqlen, n_channels))
+
   #early_stopping = EarlyStopping(monitor='val_macro_f1', mode='max', verbose=1, patience=2)
 
-  seqlen, n_channels = np.load(files[0]).shape
-  print(seqlen, n_channels)
-
   # Hyperparameters
-  lr = 0.0001 # learning rate
-  num_epochs = 30
-  batch_size = 64
+  lr = args.lr # learning rate
+  num_epochs = args.num_epochs
+  batch_size = args.batchsize
   max_seqlen = 1504
-  feat_channels = 3 # Add ENMO, z-angle and LIDS as additional channels
+  num_channels = args.num_channels # number of raw data channels
+  feat_channels = args.feat_channels # Add ENMO, z-angle and LIDS as additional channels
 
   # Use nested cross-validation based on users
   # Outer CV
@@ -204,6 +115,8 @@ def main(argv):
   random.shuffle(unique_users)
   cv_splits = 5
   fold_nusers = len(unique_users) // cv_splits
+  if len(unique_users) % cv_splits:
+    fold_nusers += 1
   predictions = []
   wake_idx = sleep_states.index('Wake')
   wake_ext_idx = sleep_states.index('Wake_ext')
@@ -215,41 +128,44 @@ def main(argv):
     val_users = trainval_users[len(train_users):]
 
     # Create partitions
-    train_fnames, train_labels, train_users = get_partition(files, labels, users, train_users,\
-                                                            sleep_states, is_train=True)
-    val_fnames, val_labels, val_users = get_partition(files, labels, users, val_users, sleep_states)
-    test_fnames, test_labels, test_users = get_partition(files, labels, users, test_users, sleep_states)
-    nsamples = len(train_fnames) + len(val_fnames) + len(test_fnames)
+    # make a copy to change wake_ext for this fold 
+    fold_labels = np.array([sleep_states.index(lbl) for lbl in labels])
+    train_indices = get_partition(raw_data, fold_labels, users, train_users, sleep_states, is_train=True)
+    val_indices = get_partition(raw_data, fold_labels, users, val_users, sleep_states)
+    test_indices = get_partition(raw_data, fold_labels, users, test_users, sleep_states)
+    nsamples = len(train_indices) + len(val_indices) + len(test_indices)
     print('Train: {:0.2f}%, Val: {:0.2f}%, Test: {:0.2f}%'\
-            .format(len(train_fnames)*100.0/nsamples, len(val_fnames)*100.0/nsamples,\
-                    len(test_fnames)*100.0/nsamples))
+            .format(len(train_indices)*100.0/nsamples, len(val_indices)*100.0/nsamples,\
+                    len(test_indices)*100.0/nsamples))
+  
+    # Rename wake_ext as wake for training samples
+    rename_indices = train_indices[fold_labels[train_indices] == wake_ext_idx]
+    fold_labels[rename_indices] = wake_idx
     
     # Data generators for computing statistics
-    stat_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='stat',\
-                              batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
+    stat_gen = DataGenerator(train_indices, raw_data, fold_labels, valid_sleep_states, partition='stat',\
+                              batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
                               n_classes=num_classes, shuffle=True)
-    mean, std = stat_gen.fit(frac=0.5)
+    mean, std = stat_gen.fit()
+    
     # Data generators for train/val/test
-    train_gen = DataGenerator(train_fnames, train_labels, valid_sleep_states, partition='train',\
-                              batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
+    train_gen = DataGenerator(train_indices, raw_data, fold_labels, valid_sleep_states, partition='train',\
+                              batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
                               n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True,
                               mean=mean, std=std)
-    val_gen = DataGenerator(val_fnames, val_labels, valid_sleep_states, partition='val',\
-                            batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
+    val_gen = DataGenerator(val_indices, raw_data, fold_labels, valid_sleep_states, partition='val',\
+                            batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
                             n_classes=num_classes, mean=mean, std=std)
-    test_gen = DataGenerator(test_fnames, test_labels, valid_sleep_states, partition='test',\
-                             batch_size=batch_size, seqlen=seqlen, n_channels=n_channels, feat_channels=feat_channels,\
+    test_gen = DataGenerator(test_indices, raw_data, fold_labels, valid_sleep_states, partition='test',\
+                             batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
                              n_classes=num_classes, mean=mean, std=std)
 
-    # Get class weights
-    class_wts = class_weight.compute_class_weight('balanced', np.unique(train_labels), train_labels)
-   
     # Create model
     # Use batchnorm as first step since computing mean and std 
     # across entire dataset is time-consuming
-    model = FCN(input_shape=(seqlen,n_channels+feat_channels), max_seqlen=max_seqlen,
+    model = FCN(input_shape=(seqlen,num_channels+feat_channels), max_seqlen=max_seqlen,
                 num_classes=len(valid_sleep_states))
-    print(model.summary())
+    #print(model.summary())
     model.compile(optimizer=Adam(lr=lr), loss=focal_loss(),
                   metrics=['accuracy', macro_f1])
 
@@ -260,9 +176,9 @@ def main(argv):
     model_checkpt = ModelCheckpoint(os.path.join(resultdir,'best_model_fold'+str(fold+1)+'.h5'),\
                                                  monitor='val_f1',\
                                                  mode='max', save_best_only=True)
-    batch_renorm_cb = BatchRenormScheduler()
+    batch_renorm_cb = BatchRenormScheduler(len(train_gen))
     history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
-                                  verbose=1, shuffle=False, callbacks=[metrics_cb, batch_renorm_cb, model_checkpt],
+                                  verbose=1, shuffle=False, callbacks=[batch_renorm_cb, metrics_cb, model_checkpt],
                                   workers=2, max_queue_size=20, use_multiprocessing=False)
  
     # Plot training history
@@ -277,8 +193,9 @@ def main(argv):
     model.load_weights(os.path.join(resultdir,'best_model_fold'+str(fold+1)+'.h5'))
     probs = model.predict(test_gen)
     y_pred = probs.argmax(axis=1)
-    y_true = test_labels
-    predictions.append((test_users, test_fnames, y_true, probs))
+    y_true = fold_labels[test_indices]
+    predictions.append((users[test_indices], data.iloc[test_indices]['timestamp'], 
+                        data.iloc[test_indices]['filename'], test_indices, y_true, probs))
 
     # Save user report
     if mode == 'binary':
@@ -300,4 +217,14 @@ def main(argv):
                                   os.path.join(resultdir,'deeplearning_multiclass_results.csv'), method='dl')
 
 if __name__ == "__main__":
-  main(sys.argv[1:])
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--indir', type=str, help='input directory containing data and labels')
+  parser.add_argument('--mode', type=str, default='binary', help='classification mode - binary/multiclass')
+  parser.add_argument('--outdir', type=str, help='output directory to store results and models')
+  parser.add_argument('--lr', type=float, default=0.001, help='learning rate')        
+  parser.add_argument('--batchsize', type=int, default=64, help='batch size')        
+  parser.add_argument('--num_epochs', type=int, default=30, help='number of epochs to run')        
+  parser.add_argument('--num_channels', type=int, default=3, help='number of data channels')
+  parser.add_argument('--feat_channels', type=int, default=0, help='number of feature channels')
+  args = parser.parse_args()
+  main(args)

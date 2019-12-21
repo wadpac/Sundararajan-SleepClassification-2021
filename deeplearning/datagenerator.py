@@ -7,16 +7,17 @@ from transforms import get_ENMO, get_angle_z, get_LIDS
 from collections import Counter
 
 class DataGenerator(Sequence):
-  def __init__(self, filenames, labels, classes, partition=None, batch_size=32, seqlen=100, n_channels=3,
+  def __init__(self, indices, data, labels, classes, partition=None, batch_size=32, seqlen=100, n_channels=3,
                n_classes=5, feat_channels=0, shuffle=False, augment=False, aug_factor=0.0, balance=False,
                mean=None, std=None):
     'Initialization'
     self.partition = partition
     self.seqlen = seqlen
     self.batch_size = batch_size
+    self.indices = indices
+    self.data = data
     self.labels = labels
     self.classes = classes
-    self.filenames = filenames
     self.n_channels = n_channels
     self.n_classes = n_classes
     self.shuffle = shuffle
@@ -33,8 +34,8 @@ class DataGenerator(Sequence):
 
   def __len__(self):
     'Denotes the number of batches per epoch'
-    nbatches = int(len(self.filenames)*(1.0+self.aug_factor) // self.batch_size)
-    if (nbatches * self.batch_size) < (len(self.filenames) * (1.0+self.aug_factor)):
+    nbatches = int(len(self.indices)*(1.0+self.aug_factor) // self.batch_size)
+    if (nbatches * self.batch_size) < (len(self.indices) * (1.0+self.aug_factor)):
       nbatches += 1
     return nbatches
 
@@ -47,10 +48,10 @@ class DataGenerator(Sequence):
     # Generate indices of the batch
     if self.balance == False: # For inference
       st_idx = index*orig_sz
-      if (index+1)*orig_sz <= (len(self.filenames)-1):
+      if (index+1)*orig_sz <= (len(self.indices)-1):
         end_idx = (index+1)*orig_sz
       else:
-        end_idx = len(self.filenames)
+        end_idx = len(self.indices)
       indices = self.indices[st_idx:end_idx]
     else: # Balance each minibatch to have same number of classes
       cls_sz = int((self.batch_size / aug_factor) // self.n_classes)
@@ -58,9 +59,8 @@ class DataGenerator(Sequence):
         cls_sz += 1
       # Generate indices with balanced classes
       indices = []
-      all_indices = np.arange(len(self.filenames))
       for cls in range(len(self.classes)):
-        cls_idx = all_indices[self.labels == cls]
+        cls_idx = self.indices[self.labels[self.indices] == cls]
         indices.extend(np.random.choice(cls_idx,cls_sz,replace=False))
       # Choose batch sized indices
       random.shuffle(indices)
@@ -74,9 +74,10 @@ class DataGenerator(Sequence):
   def __data_generation__(self, indices):
     'Generates data containing batch_size samples'
     # X : (n_samples, *dim, n_channels)
+    n_channels = self.n_channels + self.feat_channels
     if self.augment == True:
       # Initialization
-      X = np.zeros((self.batch_size, self.seqlen, self.n_channels))
+      X = np.zeros((self.batch_size, self.seqlen, n_channels))
       y = np.ones((self.batch_size), dtype=int) * -1
   
       # Get number of samples per class after augmentation
@@ -104,7 +105,7 @@ class DataGenerator(Sequence):
         # Load data from disk
         cls_indices = indices[self.labels[indices] == cls][:samp_sz[cls]]
         for i, idx in enumerate(cls_indices):
-          X[offset+i] = np.load(self.filenames[idx])
+          X[offset+i] = self.data[idx,:,:n_channels]
           y[offset+i] = self.labels[idx]
         # Choose a subset of samples to apply transformations for augmentation
         if aug_sz[cls] > 0:
@@ -113,13 +114,19 @@ class DataGenerator(Sequence):
           aug_x = np.zeros((aug_sz[cls], self.seqlen, self.n_channels))
           for i,idx in enumerate(aug_indices):
             y[offset+N+i] = self.labels[idx]
-            aug_x[i,] = np.load(self.filenames[idx])
+            aug_x[i,] = self.data[idx,:,:self.n_channels]
           # Apply one or two transformations to x,y,z of the chosen data
           aug_x = random.choice(self.aug_func)(aug_x)
           toss = random.choice([0,1])
           if toss == 1:
-              aug_x = random.choice(self.aug_func)(aug_x)
-          X[offset+N:offset+N+aug_sz[cls],:,:] = aug_x
+            aug_x = random.choice(self.aug_func)(aug_x)
+          # Get feature channels from augmented raw_data
+          if self.feat_channels > 0:    
+            ENMO = get_ENMO(aug_x[:,:,0], aug_x[:,:,1], aug_x[:,:,2])[:,:,np.newaxis]          
+            angz = get_angle_z(aug_x[:,:,0], aug_x[:,:,1], aug_x[:,:,2])[:,:,np.newaxis]         
+            LIDS = get_LIDS(aug_x[:,:,0], aug_x[:,:,1], aug_x[:,:,2])[:,:,np.newaxis] 
+            aug_x = np.concatenate((aug_x, ENMO, angz, LIDS), axis=-1) 
+        X[offset+N:offset+N+aug_sz[cls],:,:] = aug_x
         offset += samp_sz[cls] + aug_sz[cls]
       # Shuffle original and augmented data
       idx = np.arange(self.batch_size)
@@ -128,18 +135,11 @@ class DataGenerator(Sequence):
       y = y[idx]
     else: 
       # Initialization
-      X = np.zeros((len(indices), self.seqlen, self.n_channels))
+      X = np.zeros((len(indices), self.seqlen, n_channels))
       y = np.ones((len(indices)), dtype=int) * -1
       for i, idx in enumerate(indices):
-        X[i] = np.load(self.filenames[idx])
+        X[i] = self.data[idx,:,:n_channels]
         y[i] = self.labels[idx]
-
-    # Get ENMO, angz and LIDS for transformed x,y,z  
-    if self.feat_channels > 0:    
-      ENMO = get_ENMO(X[:,:,0], X[:,:,1], X[:,:,2])[:,:,np.newaxis]          
-      angz = get_angle_z(X[:,:,0], X[:,:,1], X[:,:,2])[:,:,np.newaxis]         
-      LIDS = get_LIDS(X[:,:,0], X[:,:,1], X[:,:,2])[:,:,np.newaxis]
-      X = np.concatenate((X, ENMO, angz, LIDS), axis=-1)
 
     # Normalize data if mean and std are present
     if self.mean is not None and self.std is not None:
@@ -149,17 +149,14 @@ class DataGenerator(Sequence):
   
   def on_epoch_end(self):
     'Updates indexes after each epoch'
-    self.indices = np.arange(len(self.filenames))
     if self.shuffle == True:
       np.random.shuffle(self.indices)
 
   def fit(self, frac=1.0):
     'Get mean and standard deviation for training data'
     assert 'stat' in self.partition
-
     samp_sum = np.zeros((self.seqlen, self.n_channels + self.feat_channels))
     samp_sqsum = np.zeros((self.seqlen, self.n_channels + self.feat_channels))
-
     N = int(frac*len(self)) # Get statistics using just a fraction of data
     nsamp = N*self.batch_size
     for i in tqdm(range(N)):
@@ -168,4 +165,5 @@ class DataGenerator(Sequence):
       samp_sqsum += (X**2).sum(axis=0)
     self.mean = samp_sum/nsamp
     self.std = np.sqrt(samp_sqsum/nsamp - self.mean**2)
+
     return self.mean, self.std
