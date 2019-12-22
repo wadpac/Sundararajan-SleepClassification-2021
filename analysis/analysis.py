@@ -73,8 +73,8 @@ def cv_get_classification_report(pred_list, mode, sleep_states, method='feat_eng
       y_true = pred_list[i][3]
       probs = pred_list[i][4]
     else:
-      y_true = pred_list[i][2]
-      probs = pred_list[i][3]
+      y_true = pred_list[i][4]
+      probs = pred_list[i][5]
     y_pred = probs.argmax(axis=1)
     # Get metrics across all classes
     prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred,
