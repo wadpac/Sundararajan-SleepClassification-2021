@@ -147,6 +147,7 @@ def main(argv):
                               batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
                               n_classes=num_classes, shuffle=True)
     mean, std = stat_gen.fit()
+    np.savez(os.path.join(resultdir,'Fold'+str(fold+1)+'_stats'), mean=mean, std=std)
     
     # Data generators for train/val/test
     train_gen = DataGenerator(train_indices, raw_data, fold_labels, valid_sleep_states, partition='train',\
