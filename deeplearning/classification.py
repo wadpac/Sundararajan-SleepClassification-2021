@@ -40,7 +40,8 @@ def plot_results(fold, train_result, val_result, out_fname, metric='Loss'):
   plt.title('{} for fold {}'.format(metric, fold))
   plt.ylabel(metric)
   plt.xlabel('Epochs')
-  plt.ylim(0,1)
+  ylim = 1.0 if metric != 'Loss' else 5.0
+  plt.ylim(0,ylim)
   plt.legend(['Train', 'Val'], loc='upper right')
   plt.savefig(out_fname)
   plt.clf()
@@ -114,6 +115,22 @@ def main(argv):
   unique_users = list(set(users))
   random.shuffle(unique_users)
   cv_splits = 5
+  user_cnt = Counter(users).most_common()
+  samp_per_fold = len(users)//cv_splits
+
+  # Get users to be used in test for each fold such that each fold has similar
+  # number of samples
+  fold_users = [[] for i in range(cv_splits)]
+  fold_cnt = [[] for i in range(cv_splits)]
+  for user,cnt in user_cnt:
+    idx = -1; maxdiff = 0
+    for j in range(cv_splits):
+      if (samp_per_fold - sum(fold_cnt[j])) > maxdiff:
+        maxdiff = samp_per_fold - sum(fold_cnt[j])
+        idx = j
+    fold_users[idx].append(user)    
+    fold_cnt[idx].append(cnt)
+
   fold_nusers = len(unique_users) // cv_splits
   if len(unique_users) % cv_splits:
     fold_nusers += 1
@@ -122,9 +139,9 @@ def main(argv):
   wake_ext_idx = sleep_states.index('Wake_ext')
   for fold in range(cv_splits):
     print('Evaluating fold %d' % (fold+1))
-    test_users = unique_users[fold*fold_nusers:(fold+1)*fold_nusers]
+    test_users = fold_users[fold]
     trainval_users = [user for user in unique_users if user not in test_users] 
-    train_users = trainval_users[:int(0.8*len(trainval_users))]
+    train_users = trainval_users[:min(int(0.8*len(trainval_users)), len(trainval_users)-1)]
     val_users = trainval_users[len(train_users):]
 
     # Create partitions
@@ -137,11 +154,16 @@ def main(argv):
     print('Train: {:0.2f}%, Val: {:0.2f}%, Test: {:0.2f}%'\
             .format(len(train_indices)*100.0/nsamples, len(val_indices)*100.0/nsamples,\
                     len(test_indices)*100.0/nsamples))
-  
+ 
+    chosen_indices = train_indices[fold_labels[train_indices] != wake_ext_idx]
+    class_wts = class_weight.compute_class_weight(class_weight='balanced', classes=np.unique(fold_labels[chosen_indices]),
+                                                  y=fold_labels[chosen_indices])
+    
     # Rename wake_ext as wake for training samples
     rename_indices = train_indices[fold_labels[train_indices] == wake_ext_idx]
     fold_labels[rename_indices] = wake_idx
-    
+
+
     # Data generators for computing statistics
     stat_gen = DataGenerator(train_indices, raw_data, fold_labels, valid_sleep_states, partition='stat',\
                               batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
@@ -167,7 +189,7 @@ def main(argv):
     model = FCN(input_shape=(seqlen,num_channels+feat_channels), max_seqlen=max_seqlen,
                 num_classes=len(valid_sleep_states))
     #print(model.summary())
-    model.compile(optimizer=Adam(lr=lr), loss=focal_loss(),
+    model.compile(optimizer=Adam(lr=lr), loss=focal_loss(class_wts),
                   metrics=['accuracy', macro_f1])
 
     # Train model
@@ -179,9 +201,10 @@ def main(argv):
                                                  mode='max', save_best_only=True)
     batch_renorm_cb = BatchRenormScheduler(len(train_gen))
     history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
-                                  verbose=1, shuffle=False, callbacks=[batch_renorm_cb, metrics_cb, model_checkpt],
-                                  workers=2, max_queue_size=20, use_multiprocessing=False)
- 
+                        verbose=1, shuffle=False,
+                        callbacks=[batch_renorm_cb, metrics_cb, model_checkpt],
+                        workers=2, max_queue_size=20, use_multiprocessing=False)
+
     # Plot training history
     plot_results(fold+1, history.history['loss'], history.history['val_loss'],\
                  os.path.join(resultdir,'Fold'+str(fold+1)+'_loss.jpg'), metric='Loss')
