@@ -117,25 +117,29 @@ def cv_get_classification_report(pred_list, mode, sleep_states, method='feat_eng
   # Confusion matrix
   confusion_mat = confusion_mat / nfolds
   if mode == 'binary':
-    print('ConfMat\tWake\tSleep\tNonwear\n')
+    print('ConfMat\tWake\tSleep\n')
     for i in range(confusion_mat.shape[0]):
-      print('%s\t%0.4f\t%0.4f\t%0.4f' % 
-               (sleep_states[i], confusion_mat[i][0],
-                confusion_mat[i][1], confusion_mat[i][2]))
+      print('%s\t%0.4f\t%0.4f' % 
+               (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1]))
+    print('\n')
+  elif mode == 'nonwear':
+    print('ConfMat\tWear\tNonwear\n')
+    for i in range(confusion_mat.shape[0]):
+      print('%s\t%0.4f\t%0.4f' % 
+               (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1]))
     print('\n')
   else:    
-    print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\tNonwear\n')
+    print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\n')
     for i in range(confusion_mat.shape[0]):
-      print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % 
+      print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % 
 	       (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1], 
-	        confusion_mat[i][2], confusion_mat[i][3],
-                confusion_mat[i][4], confusion_mat[i][5]))
+	        confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
     print('\n')
 
 def cv_classification_report(infile, mode='binary'):
   df = pd.read_csv(infile)
   
-  sleep_states = [col.split('_')[1] for col in df.columns if (col.startswith('true')) and (not col.endswith('Nonwear'))]
+  sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
   sleep_labels = [idx for idx,state in enumerate(sleep_states)]
   true_cols = ['true_'+state for state in sleep_states]
   pred_cols = ['smooth_'+state for state in sleep_states]
@@ -144,7 +148,7 @@ def cv_classification_report(infile, mode='binary'):
   
   metrics = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'accuracy':0.0, 'AUC':0.0, 'AP':0.0}
   class_metrics = {}
-  for state in (sleep_states + ['Nonwear']):
+  for state in sleep_states:
     class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'AUC':0.0, 'AP':0.0, 'samples':0.0}
   
   for fold in range(nfolds):  
@@ -179,22 +183,6 @@ def cv_classification_report(infile, mode='binary'):
       ap = average_precision_score(true_prob[:,idx], pred_prob[:,idx])
       class_metrics[state]['AP'] += ap
  
-    # Get metrics for Nonwear
-    true_prob = df[df['Fold'] == fold+1]['true_Nonwear'].values 
-    pred_prob = 1.0 - df[df['Fold'] == fold+1][pred_cols].values.sum(axis=1)
-    test_prob = pred_prob[true_prob > 0]
-    thresh = 1.0/(nclasses+1)
-    y_pred = pred_prob > thresh
-    fold_class_metrics = classification_report(true_prob, y_pred, labels=[0,1], output_dict=True)
-    class_metrics['Nonwear']['precision'] += fold_class_metrics['1']['precision']
-    class_metrics['Nonwear']['recall'] += fold_class_metrics['1']['recall']
-    class_metrics['Nonwear']['f1-score'] += fold_class_metrics['1']['f1-score']
-    class_metrics['Nonwear']['samples'] += fold_class_metrics['1']['support']
-    auc = roc_auc_score(true_prob, pred_prob)
-    class_metrics['Nonwear']['AUC'] += auc
-    ap = average_precision_score(true_prob, pred_prob)
-    class_metrics['Nonwear']['AP'] += ap
-
   # Average metrics across all folds
   for key in metrics.keys():
     metrics[key] = metrics[key]/nfolds
@@ -237,17 +225,21 @@ def cv_classification_report(infile, mode='binary'):
 
   confusion_mat = confusion_mat / nfolds
   if mode == 'binary':
-    print('ConfMat\tWake\tSleep\tNonwear\n')
+    print('ConfMat\tWake\tSleep\n')
     for i in range(confusion_mat.shape[0]):
-      print('%s\t%0.4f\t%0.4f\t%0.4f' % 
-               (sleep_states[i], confusion_mat[i][0],
-                confusion_mat[i][1], confusion_mat[i][2]))
+      print('%s\t%0.4f\t%0.4f' % 
+               (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1]))
+    print('\n')
+  elif mode == 'nonwear':
+    print('ConfMat\tWear\tNonwear\n')
+    for i in range(confusion_mat.shape[0]):
+      print('%s\t%0.4f\t%0.4f' % 
+               (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1]))
     print('\n')
   else:    
-    print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\tNonwear\n')
+    print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\n')
     for i in range(confusion_mat.shape[0]):
       print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % 
 	       (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1], 
-	        confusion_mat[i][2], confusion_mat[i][3],
-                confusion_mat[i][4], confusion_mat[i][5]))
+	        confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
     print('\n')
