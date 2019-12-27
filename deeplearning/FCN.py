@@ -7,9 +7,7 @@ from tensorflow.keras.regularizers import l2
 import tensorflow.keras.backend as K
 from tensorflow.keras.constraints import UnitNorm, MaxNorm
 
-norm_max = 3.0
-
-def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
+def identity_block(inputs, filters, ksz, stage, block, norm_max=1.0):
   """
   Identity block for ResNet
 
@@ -20,7 +18,7 @@ def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
   ksz : filter width of middle convolutional layer
   stage : integer used to name layers
   block : string used to name layers
-  activation : activation function to be used
+  norm_max    : maximum norm for constraint
 
   Returns
   _______
@@ -66,7 +64,7 @@ def identity_block(inputs, filters, ksz, stage, block, activation='relu'):
                          beta_constraint=MaxNorm(norm_max,axis=0))(x)
   return x
 
-def conv_block(inputs, filters, ksz, stage, block, s=2, activation='relu'):
+def conv_block(inputs, filters, ksz, stage, block, s=2, norm_max=1.0):
   """
   Convolutional block for ResNet
 
@@ -78,7 +76,7 @@ def conv_block(inputs, filters, ksz, stage, block, s=2, activation='relu'):
   stage : integer used to name layers
   block : string used to name layers
   s : integer specifying stride
-  activation : activation function to be used
+  norm_max    : maximum norm for constraint
 
   Returns
   _______
@@ -128,7 +126,7 @@ def conv_block(inputs, filters, ksz, stage, block, s=2, activation='relu'):
                          beta_constraint=MaxNorm(norm_max,axis=0))(x)
   return x
 
-def Conv1DTranspose(inputs, filters, ksz, s=2, padding='same'):
+def Conv1DTranspose(inputs, filters, ksz, s=2, padding='same', norm_max=1.0):
   """
   1D Transposed convolution for FCN
 
@@ -139,6 +137,7 @@ def Conv1DTranspose(inputs, filters, ksz, s=2, padding='same'):
   ksz : filter width of convolutional layer
   s : integer specifying stride
   padding : padding for the convolutional layer
+  norm_max    : maximum norm for constraint
 
   Returns
   _______
@@ -152,7 +151,7 @@ def Conv1DTranspose(inputs, filters, ksz, s=2, padding='same'):
   x = Lambda(lambda x: K.squeeze(x, axis=2))(x)
   return x
 
-def FCN(input_shape, max_seqlen, num_classes=2, activation='relu'):
+def FCN(input_shape, max_seqlen, num_classes=2, norm_max=1.0):
   """
   Generate a fully convolutional neural network (FCN) model.
 
@@ -160,7 +159,7 @@ def FCN(input_shape, max_seqlen, num_classes=2, activation='relu'):
   ----------
   input_shape : tuple defining shape of the input dataset: (num_timesteps, num_channels)
   num_classes : integer defining number of classes for classification task
-  activation : activation function to be used
+  norm_max    : maximum norm for constraint
 
   Returns
   -------
@@ -184,9 +183,9 @@ def FCN(input_shape, max_seqlen, num_classes=2, activation='relu'):
                          beta_constraint=MaxNorm(norm_max,axis=0))(x)
 
   # Stage 2
-  x = conv_block(x, ksz=3, filters=[16,16,32], stage=2, block='a', s=2)
-  x = identity_block(x, ksz=3, filters=[16,16,32], stage=2, block='b')
-  x = identity_block(x, ksz=3, filters=[16,16,32], stage=2, block='c')
+  x = conv_block(x, ksz=3, filters=[16,16,32], stage=2, block='a', s=2, norm_max=norm_max)
+  x = identity_block(x, ksz=3, filters=[16,16,32], stage=2, block='b', norm_max=norm_max)
+  x = identity_block(x, ksz=3, filters=[16,16,32], stage=2, block='c', norm_max=norm_max)
 
 #  # Stage 3
 #  x = conv_block(x, ksz=3, filters=[64,64,128], stage=3, block='a', s=2)
@@ -210,8 +209,7 @@ def FCN(input_shape, max_seqlen, num_classes=2, activation='relu'):
 #  x = identity_block(x, ksz=3, filters=[256,256,512], stage=5, block='f')
 
   # Output stage
-  x = Conv1DTranspose(x, filters=64, ksz=5, s=4)
-  x = Dropout(rate=0.5)(x)
+  x = Conv1DTranspose(x, filters=64, ksz=5, s=4, norm_max=norm_max)
   x = GlobalAveragePooling1D()(x)
   outputs = Dense(num_classes, activation='softmax', name='Dense',
                   kernel_constraint=MaxNorm(norm_max,axis=[0,1]),
