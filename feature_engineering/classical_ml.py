@@ -19,7 +19,7 @@ from analysis import cv_save_feat_importances_result, cv_save_classification_res
 
 def main(argv):
   infile = argv[0]
-  mode = argv[1] # binary or multiclass
+  mode = argv[1] # binary or multiclass or nonwear
   dataset = argv[2]
   outdir = argv[3]
 
@@ -30,13 +30,19 @@ def main(argv):
   # Read data file and retain data only corresponding to 5 sleep states or nonwear
   df = pd.read_csv(infile, dtype={'label':object, 'user':object,
                    'position':object, 'dataset':object})
-  sleep_states = ['Wake','NREM 1','NREM 2','NREM 3','REM','Nonwear']
-  df = df[df['label'].isin(sleep_states)].reset_index()
-  # Collate sleep stages if in binary mode
   if mode == 'binary':
-    df.loc[df['label'].isin(['REM','NREM 1','NREM 2','NREM 3']), 'label'] = 'Sleep'
-    sleep_states = ['Wake','Sleep','Nonwear']
-
+    states = ['Wake', 'Sleep']
+    collate_states = ['NREM 1', 'NREM 2', 'NREM 3', 'REM']
+    df.loc[df['label'].isin(collate_states), 'label'] = 'Sleep'
+  elif mode == 'nonwear':
+    states = ['Wear', 'Nonwear']
+    collate_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM']
+    df.loc[df['label'].isin(collate_states), 'label'] = 'Wear'
+  else:
+    states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM']
+    
+  df = df[df['label'].isin(states)].reset_index()
+  
   print('... Number of data samples: %d' % len(df))
   ctr = Counter(df['label'])
   for cls in ctr:
@@ -59,7 +65,7 @@ def main(argv):
   ts = df['timestamp']
   X = df[feat_cols].values
   y = df['label']
-  y = np.array([sleep_states.index(i) for i in y])
+  y = np.array([states.index(i) for i in y])
   groups = df['user']
   fnames = df['filename']
 
@@ -82,32 +88,32 @@ def main(argv):
     # Inner CV
     strat_kfold = StratifiedKFold(n_splits=inner_cv_splits, random_state=0,
                                   shuffle=True)       
-    #################### Without balancing #######################
-
-    custom_cv_indices = []
-    for grp_train_idx, grp_test_idx in \
-            strat_kfold.split(out_fold_X_train,out_fold_y_train):
-      custom_cv_indices.append((grp_train_idx, grp_test_idx))
-
-    pipe = Pipeline([('scl', StandardScaler()),
-                 ('clf', RandomForestClassifier(class_weight='balanced',
-                 random_state=0))])
-
-    print('Fold'+str(out_fold)+' - Imbalanced: Hyperparameter search')
-    search_params = {'clf__n_estimators':[50,100,200,300,500],
-                 'clf__max_depth': [5,10,None]}
-    cv_clf = RandomizedSearchCV(estimator=pipe, param_distributions=search_params,
-                            cv=custom_cv_indices, scoring='f1_macro', n_iter=5,
-                            n_jobs=-1, verbose=2)
-    cv_clf.fit(out_fold_X_train, out_fold_y_train)
-    pickle.dump(cv_clf, open(os.path.join(resultdir,\
-                'fold'+str(out_fold)+'_'+ mode + '_imbalanced_RF.sav'),'wb'))
-    out_fold_y_test_pred = cv_clf.predict_proba(out_fold_X_test)
-    print('Fold'+str(out_fold)+' - Imbalanced', cv_clf.best_params_)
-
-    imbalanced_pred.append((out_fold_users_test, out_fold_ts_test, out_fold_fnames_test,
-                            out_fold_y_test, out_fold_y_test_pred))
-    imbalanced_imp.append(cv_clf.best_estimator_.named_steps['clf'].feature_importances_)
+#    #################### Without balancing #######################
+#
+#    custom_cv_indices = []
+#    for grp_train_idx, grp_test_idx in \
+#            strat_kfold.split(out_fold_X_train,out_fold_y_train):
+#      custom_cv_indices.append((grp_train_idx, grp_test_idx))
+#
+#    pipe = Pipeline([('scl', StandardScaler()),
+#                 ('clf', RandomForestClassifier(class_weight='balanced',
+#                 random_state=0))])
+#
+#    print('Fold'+str(out_fold)+' - Imbalanced: Hyperparameter search')
+#    search_params = {'clf__n_estimators':[50,100,200,300,500],
+#                 'clf__max_depth': [5,10,None]}
+#    cv_clf = RandomizedSearchCV(estimator=pipe, param_distributions=search_params,
+#                            cv=custom_cv_indices, scoring='f1_macro', n_iter=5,
+#                            n_jobs=-1, verbose=2)
+#    cv_clf.fit(out_fold_X_train, out_fold_y_train)
+#    pickle.dump(cv_clf, open(os.path.join(resultdir,\
+#                'fold'+str(out_fold)+'_'+ mode + '_imbalanced_RF.sav'),'wb'))
+#    out_fold_y_test_pred = cv_clf.predict_proba(out_fold_X_test)
+#    print('Fold'+str(out_fold)+' - Imbalanced', cv_clf.best_params_)
+#
+#    imbalanced_pred.append((out_fold_users_test, out_fold_ts_test, out_fold_fnames_test,
+#                            out_fold_y_test, out_fold_y_test_pred))
+#    imbalanced_imp.append(cv_clf.best_estimator_.named_steps['clf'].feature_importances_)
 
     ################## Balancing with SMOTE ###################
 
@@ -150,18 +156,18 @@ def main(argv):
                           out_fold_y_test, out_fold_y_test_pred))
     balanced_imp.append(cv_clf.best_estimator_.feature_importances_)
 
-  print('############## Imbalanced classification ##############')
-  # Save imbalanced classification reports
-  cv_save_feat_importances_result(imbalanced_imp, feat_cols,
-                   os.path.join(outdir, mode + '_imbalanced_feat_imp.csv'))
-  cv_save_classification_result(imbalanced_pred, sleep_states,
-                   os.path.join(outdir, mode + '_imbalanced_classification.csv'))
+#  print('############## Imbalanced classification ##############')
+#  # Save imbalanced classification reports
+#  cv_save_feat_importances_result(imbalanced_imp, feat_cols,
+#                   os.path.join(outdir, mode + '_imbalanced_feat_imp.csv'))
+#  cv_save_classification_result(imbalanced_pred, states,
+#                   os.path.join(outdir, mode + '_imbalanced_classification.csv'))
  
   print('############## Balanced classification ##############')
   # Save balanced classification reports
   cv_save_feat_importances_result(balanced_imp, feat_cols,
                    os.path.join(outdir, mode + '_balanced_feat_imp.csv'))
-  cv_save_classification_result(balanced_pred, sleep_states,
+  cv_save_classification_result(balanced_pred, states,
                    os.path.join(outdir, mode + '_balanced_classification.csv'))
     
 if __name__ == "__main__":
