@@ -8,9 +8,9 @@ def main(argv):
   infile = argv[0]
   outdir = argv[1]
 
-  sleep_states = ['Wake', 'Sleep', 'Nonwear']
+  sleep_states = ['Wake', 'Sleep']
   df = pd.read_csv(infile)
-  df = df[df['label'] != 'Wake_ext'].reset_index()
+  df = df[(df['label'] != 'Wake_ext') & (df['label'] != 'Nonwear')].reset_index()
   df['binary_label'] = df['label']
   df.loc[df['label'] == 'NREM 1','binary_label'] = 'Sleep'
   df.loc[df['label'] == 'NREM 2','binary_label'] = 'Sleep'
@@ -24,7 +24,6 @@ def main(argv):
   predictions = [(df['user'], df['timestamp'], df['filename'], y_true, y_pred_onehot)]
 
   cv_save_classification_result(predictions, sleep_states, os.path.join(outdir, 'heuristic_classification.csv'))
- 
 
 if __name__ == "__main__":
   main(sys.argv[1:])

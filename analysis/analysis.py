@@ -239,7 +239,7 @@ def cv_classification_report(infile, mode='binary'):
   else:    
     print('ConfMat\tWake\tNREM1\tNREM2\tNREM3\tREM\n')
     for i in range(confusion_mat.shape[0]):
-      print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % 
+      print('%s\t%0.4f\t%0.4f\t%0.4f\t%0.4f\t%0.4f' % 
 	       (sleep_states[i], confusion_mat[i][0], confusion_mat[i][1], 
 	        confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
     print('\n')
