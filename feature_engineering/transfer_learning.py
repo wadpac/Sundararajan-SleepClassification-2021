@@ -84,7 +84,6 @@ def main(args):
       X_train_resamp, y_train_resamp = smote.fit_resample(X_train_sc, fold_y_train)
       X_concat = np.concatenate((X_train_resamp, X_val_sc), axis=0)
       y_concat = np.concatenate((y_train_resamp, y_val), axis=0)
-      print(X_concat.shape, y_concat.shape)
 
       # Get suitable parameters using validation data
       clf = RandomForestClassifier(class_weight='balanced',
@@ -92,7 +91,6 @@ def main(args):
       search_params = {'n_estimators':[50,100,200,300,500],
                  'max_depth': [5,10,None]}
       cv_indices = [(np.arange(X_train_resamp.shape[0]), np.arange(X_train_resamp.shape[0], X_concat.shape[0]))]
-      print(cv_indices)
       cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params,
                             cv=cv_indices, scoring='f1_macro',
                             n_iter=5, n_jobs=-1, verbose=2)
