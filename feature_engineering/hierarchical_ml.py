@@ -15,6 +15,9 @@ from sklearn_hierarchical_classification.classifier import HierarchicalClassifie
 from sklearn_hierarchical_classification.constants import ROOT
 from sklearn_hierarchical_classification.metrics import h_fbeta_score, multi_labeled, fill_ancestors
 
+sys.path.append('../analysis/')
+from analysis import cv_save_classification_result
+
 from tqdm import tqdm
 import networkx as nx
 from networkx import DiGraph
@@ -24,37 +27,37 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-def save_user_report(pred_list, fname):
-  sleep_states = ['Wake','Sleep','REM','NREM','NREM 3','Light','NREM 1','NREM 2']
-  nfolds = len(pred_list)
-  for i in range(nfolds):
-    users = pred_list[i][0]
-    y_true = pred_list[i][1]
-    y_pred = pred_list[i][2]
-    classes = pred_list[i][3]    
-    fold = np.array([i+1]*users.shape[0])
-    data = {'Fold':fold, 'Users':users}
-    for state in sleep_states:
-      class_idx = classes.index(state)
-      state_true = y_true[:,class_idx]
-      state_pred = y_pred[:,class_idx]
-      data.update({state+'_true': state_true, state+'_pred': state_pred})
-    df = pd.DataFrame(data)
-    if i != 0:
-      df.to_csv(fname, mode='a', header=False, index=False)  
-    else:
-      df.to_csv(fname, mode='w', header=True, index=False)  
-
-def get_classification_report(results):
-  sleep_states = ['Wake','Sleep','REM','NREM','NREM 3','Light','NREM 1','NREM 2','Overall']
-  
-  print('\nState\t\tPrecision\tRecall\t\tFbeta\n')
-  for key in sleep_states:
-    precision = np.array(results[key]['precision']).mean()
-    recall = np.array(results[key]['recall']).mean()
-    fbeta = np.array(results[key]['fbeta']).mean()
-    print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f' % (key,precision,recall,fbeta))  
-  print('\n')
+#def save_user_report(pred_list, fname):
+#  sleep_states = ['Wake','Sleep','REM','NREM','NREM 3','Light','NREM 1','NREM 2']
+#  nfolds = len(pred_list)
+#  for i in range(nfolds):
+#    users = pred_list[i][0]
+#    y_true = pred_list[i][1]
+#    y_pred = pred_list[i][2]
+#    classes = pred_list[i][3]    
+#    fold = np.array([i+1]*users.shape[0])
+#    data = {'Fold':fold, 'Users':users}
+#    for state in sleep_states:
+#      class_idx = classes.index(state)
+#      state_true = y_true[:,class_idx]
+#      state_pred = y_pred[:,class_idx]
+#      data.update({state+'_true': state_true, state+'_pred': state_pred})
+#    df = pd.DataFrame(data)
+#    if i != 0:
+#      df.to_csv(fname, mode='a', header=False, index=False)  
+#    else:
+#      df.to_csv(fname, mode='w', header=True, index=False)  
+#
+#def get_classification_report(results):
+#  sleep_states = ['Wake','Sleep','REM','NREM','NREM 3','Light','NREM 1','NREM 2','Overall']
+#  
+#  print('\nState\t\tPrecision\tRecall\t\tFbeta\n')
+#  for key in sleep_states:
+#    precision = np.array(results[key]['precision']).mean()
+#    recall = np.array(results[key]['recall']).mean()
+#    fbeta = np.array(results[key]['fbeta']).mean()
+#    print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f' % (key,precision,recall,fbeta))  
+#  print('\n')
 
 def custom_h_fbeta(y_true, y_pred, graph=None):
   with multi_labeled(y_true, y_pred, graph) as (y_test_, y_pred_, graph_, classes_):
@@ -78,34 +81,43 @@ def get_node_metrics(y_true, y_pred, classes, node, beta=1.0):
 
 def main(argv):
   infile = argv[0]
-  outdir = argv[1]
+  dataset = argv[1]
+  outdir = argv[2]
 
-  if not os.path.exists(outdir):
-    os.makedirs(outdir)
+  resultdir = os.path.join(outdir, 'models')
+  if not os.path.exists(resultdir):
+    os.makedirs(resultdir)
 
   # Read data file and retain data only corresponding to 5 sleep states
-  df = pd.read_csv(infile, dtype={'label':object, 'user':object, 'position':object, 'dataset':object})
-  orig_cols = df.columns
-  sleep_states = ['Wake','NREM 1','NREM 2','NREM 3','REM']
-  df = df[df['label'].isin(sleep_states)].reset_index()
-  df = df[df['dataset'] == 'UPenn'].reset_index()
-  df = df[orig_cols]
+  df = pd.read_csv(infile, dtype={'label':object, 'user':object,\
+                   'position':object, 'dataset':object})
+  states = ['Wake','NREM 1','NREM 2','NREM 3','REM','Nonwear']
+  df = df[df['label'].isin(states)].reset_index()
+  
   print('... Number of data samples: %d' % len(df))
   ctr = Counter(df['label'])
   for cls in ctr:
     print('%s: %d (%0.2f%%)' % (cls,ctr[cls],ctr[cls]*100.0/len(df))) 
 
-  feat_cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad','ENMO_entropy1','ENMO_entropy2', 'ENMO_prevdiff', 'ENMO_nextdiff', \
-               'angz_mean','angz_std','angz_min','angz_max','angz_mad','angz_entropy1','angz_entropy2', 'angz_prevdiff', 'angz_nextdiff', \
-               'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad','LIDS_entropy1','LIDS_entropy2', 'LIDS_prevdiff', 'LIDS_nextdiff']
+  feat_cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad',\
+               'ENMO_entropy1','ENMO_entropy2', 'ENMO_prevdiff', 'ENMO_nextdiff',\
+               'angz_mean','angz_std','angz_min','angz_max','angz_mad',\
+               'angz_entropy1','angz_entropy2', 'angz_prevdiff', 'angz_nextdiff', \
+               'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad',\
+               'LIDS_entropy1','LIDS_entropy2', 'LIDS_prevdiff', 'LIDS_nextdiff']
 
+  ts = df['timestamp']
   X = df[feat_cols].values
   y = df['label']
+  #y = np.array([states.index(i) for i in y])
   groups = df['user']
+  fnames = df['filename']
+  feat_len = X.shape[1]
 
   # Class hierarchy for sleep stages
   class_hierarchy = {
-    ROOT : {"Wake", "Sleep"},
+    ROOT : {"Wear", "Nonwear"},
+    "Wear" : {"Wake", "Sleep"},
     "Sleep" : {"NREM", "REM"},
     "NREM" : {"Light", "NREM 3"},
     "Light" : {"NREM 1", "NREM 2"} 
@@ -113,7 +125,7 @@ def main(argv):
   
   graph = DiGraph(class_hierarchy)    
   
-  outer_cv_splits = 5; inner_cv_splits = 3
+  outer_cv_splits = 5; inner_cv_splits = 5
   factor = 10.0
   
   results = {'Wake': {'precision': [], 'recall': [], 'fbeta': []},
@@ -137,6 +149,8 @@ def main(argv):
     out_fold_X_train = X[train_indices,:]; out_fold_X_test = X[test_indices,:]
     out_fold_y_train = y[train_indices]; out_fold_y_test = y[test_indices]
     out_fold_users_test = groups[test_indices]
+    out_fold_ts_test = ts[test_indices]
+    out_fold_fnames_test = fnames[test_indices]
     
     # Create a pipeline with scaler and hierarchical classifier
     pipe = Pipeline([('scaler', StandardScaler()),
@@ -150,7 +164,8 @@ def main(argv):
                     ])
     
     # Inner CV
-    strat_kfold = StratifiedKFold(n_splits=inner_cv_splits, random_state=0, shuffle=True)       
+    strat_kfold = StratifiedKFold(n_splits=inner_cv_splits,\
+                                  random_state=0, shuffle=True)       
 
     custom_cv_indices = []
     for grp_train_idx, grp_test_idx in strat_kfold.split(out_fold_X_train,out_fold_y_train):
@@ -163,52 +178,60 @@ def main(argv):
                        cv=custom_cv_indices, scoring=make_scorer(custom_h_fbeta,graph=graph), n_iter=5, \
                        n_jobs=-1, verbose=1)
     cv_clf.fit(out_fold_X_train, out_fold_y_train)
+    pickle.dump(cv_clf, open(os.path.join(resultdir,\
+                'fold'+str(out_fold)+'_hierarchical_RF.sav'),'wb'))
     print('Predicting')
     out_fold_y_pred = cv_clf.predict(out_fold_X_test)
+    out_fold_y_pred_prob = cv_clf.predict_proba(out_fold_X_test)
     
     best_clf = cv_clf.best_estimator_
         
     # Demonstrate using our hierarchical metrics module with MLB wrapper
     with multi_labeled(out_fold_y_test, out_fold_y_pred, best_clf.named_steps['clf'].graph_) \
                             as (y_test_, y_pred_, graph_, classes_):
-      fold_h_prec, fold_h_rec, fold_h_fbeta = h_fbeta_score(y_test_, y_pred_, graph_)
-      results['Overall']['precision'].append(fold_h_prec); results['Overall']['recall'].append(fold_h_rec)
-      results['Overall']['fbeta'].append(fold_h_fbeta)
-      print("Fold %d: precision: %0.4f, recall: %0.4f, fbeta: %0.4f" % (out_fold, fold_h_prec, fold_h_rec, fold_h_fbeta))
+#      fold_h_prec, fold_h_rec, fold_h_fbeta = h_fbeta_score(y_test_, y_pred_, graph_)
+#      results['Overall']['precision'].append(fold_h_prec); results['Overall']['recall'].append(fold_h_rec)
+#      results['Overall']['fbeta'].append(fold_h_fbeta)
+#      print("Fold %d: precision: %0.4f, recall: %0.4f, fbeta: %0.4f" % (out_fold, fold_h_prec, fold_h_rec, fold_h_fbeta))
       
       y_test_ = fill_ancestors(y_test_, graph=graph_)
       y_pred_ = fill_ancestors(y_pred_, graph=graph_)
+      print(y_pred_[:5])
+      print(out_fold_y_pred_prob[:5])
 
-      hierarchical_pred.append((out_fold_users_test, y_test_, y_pred_, classes_))
+      hierarchical_pred.append((out_fold_users_test, out_fold_ts_test, out_fold_fnames_test,
+                                y_test_, out_fold_y_pred_prob, classes_))
 
-      fold_wake_prec, fold_wake_rec, fold_wake_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'Wake')
-      fold_sleep_prec, fold_sleep_rec, fold_sleep_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'Sleep')
-      fold_rem_prec, fold_rem_rec, fold_rem_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'REM')
-      fold_nrem_prec, fold_nrem_rec, fold_nrem_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'NREM')
-      fold_nrem3_prec, fold_nrem3_rec, fold_nrem3_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'NREM 3')
-      fold_light_prec, fold_light_rec, fold_light_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'Light')
-      fold_nrem1_prec, fold_nrem1_rec, fold_nrem1_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'NREM 1')
-      fold_nrem2_prec, fold_nrem2_rec, fold_nrem2_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'NREM 2')
-      
-      results['Wake']['precision'].append(fold_wake_prec); results['Wake']['recall'].append(fold_wake_rec)
-      results['Wake']['fbeta'].append(fold_wake_fbeta) 
-      results['Sleep']['precision'].append(fold_sleep_prec); results['Sleep']['recall'].append(fold_sleep_rec)
-      results['Sleep']['fbeta'].append(fold_sleep_fbeta) 
-      results['REM']['precision'].append(fold_rem_prec); results['REM']['recall'].append(fold_rem_rec)
-      results['REM']['fbeta'].append(fold_rem_fbeta) 
-      results['NREM']['precision'].append(fold_nrem_prec); results['NREM']['recall'].append(fold_nrem_rec)
-      results['NREM']['fbeta'].append(fold_nrem_fbeta) 
-      results['NREM 3']['precision'].append(fold_nrem3_prec); results['NREM 3']['recall'].append(fold_nrem3_rec)
-      results['NREM 3']['fbeta'].append(fold_nrem3_fbeta) 
-      results['Light']['precision'].append(fold_light_prec); results['Light']['recall'].append(fold_light_rec)
-      results['Light']['fbeta'].append(fold_light_fbeta) 
-      results['NREM 1']['precision'].append(fold_nrem1_prec); results['NREM 1']['recall'].append(fold_nrem1_rec)
-      results['NREM 1']['fbeta'].append(fold_nrem1_fbeta) 
-      results['NREM 2']['precision'].append(fold_nrem2_prec); results['NREM 2']['recall'].append(fold_nrem2_rec)
-      results['NREM 2']['fbeta'].append(fold_nrem2_fbeta) 
+#      fold_wake_prec, fold_wake_rec, fold_wake_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'Wake')
+#      fold_sleep_prec, fold_sleep_rec, fold_sleep_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'Sleep')
+#      fold_rem_prec, fold_rem_rec, fold_rem_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'REM')
+#      fold_nrem_prec, fold_nrem_rec, fold_nrem_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'NREM')
+#      fold_nrem3_prec, fold_nrem3_rec, fold_nrem3_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'NREM 3')
+#      fold_light_prec, fold_light_rec, fold_light_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'Light')
+#      fold_nrem1_prec, fold_nrem1_rec, fold_nrem1_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'NREM 1')
+#      fold_nrem2_prec, fold_nrem2_rec, fold_nrem2_fbeta, _ = get_node_metrics(y_test_, y_pred_, classes_, 'NREM 2')
+#      
+#      results['Wake']['precision'].append(fold_wake_prec); results['Wake']['recall'].append(fold_wake_rec)
+#      results['Wake']['fbeta'].append(fold_wake_fbeta) 
+#      results['Sleep']['precision'].append(fold_sleep_prec); results['Sleep']['recall'].append(fold_sleep_rec)
+#      results['Sleep']['fbeta'].append(fold_sleep_fbeta) 
+#      results['REM']['precision'].append(fold_rem_prec); results['REM']['recall'].append(fold_rem_rec)
+#      results['REM']['fbeta'].append(fold_rem_fbeta) 
+#      results['NREM']['precision'].append(fold_nrem_prec); results['NREM']['recall'].append(fold_nrem_rec)
+#      results['NREM']['fbeta'].append(fold_nrem_fbeta) 
+#      results['NREM 3']['precision'].append(fold_nrem3_prec); results['NREM 3']['recall'].append(fold_nrem3_rec)
+#      results['NREM 3']['fbeta'].append(fold_nrem3_fbeta) 
+#      results['Light']['precision'].append(fold_light_prec); results['Light']['recall'].append(fold_light_rec)
+#      results['Light']['fbeta'].append(fold_light_fbeta) 
+#      results['NREM 1']['precision'].append(fold_nrem1_prec); results['NREM 1']['recall'].append(fold_nrem1_rec)
+#      results['NREM 1']['fbeta'].append(fold_nrem1_fbeta) 
+#      results['NREM 2']['precision'].append(fold_nrem2_prec); results['NREM 2']['recall'].append(fold_nrem2_rec)
+#      results['NREM 2']['fbeta'].append(fold_nrem2_fbeta) 
                       
-  get_classification_report(results)
-  save_user_report(hierarchical_pred, os.path.join(outdir,'hierarchical_results.csv'))
+#  get_classification_report(results)
+#  save_user_report(hierarchical_pred, os.path.join(outdir,'hierarchical_results.csv'))
+  cv_save_classification_result(hierarchical_pred, states,
+                                os.path.join(outdir, 'hierarchical_classification_results.csv'))
 
 if __name__ == "__main__":
   main(sys.argv[1:])
