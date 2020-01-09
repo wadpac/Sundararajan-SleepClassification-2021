@@ -23,9 +23,9 @@ def main(argv):
       cls_df.set_index('timestamp', inplace=True)
       cls_mean = cls_df.rolling(str(time_interval)+'S').mean()
       df.loc[df['Users'] == user, sm_col] = cls_mean.values
-  norm = df[sm_cols].sum(axis=1)
-  for col in sm_cols:
-    df[col] = df[col]/norm
+#  norm = df[sm_cols].sum(axis=1)
+#  for col in sm_cols:
+#    df[col] = df[col]/norm
   df.to_csv(outfile, index=False, sep=',')
 
 if __name__ == "__main__":
