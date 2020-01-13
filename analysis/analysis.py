@@ -154,10 +154,10 @@ def cv_classification_report(infile, mode='binary'):
   nclasses = len(true_cols)
   nfolds = len(set(df['Fold']))
   
-  metrics = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'accuracy':0.0, 'AUC':0.0, 'AP':0.0}
+  metrics = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'accuracy':0.0, 'AP':0.0}
   class_metrics = {}
   for state in sleep_states:
-    class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'AUC':0.0, 'AP':0.0, 'samples':0.0}
+    class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'AP':0.0, 'samples':0.0}
   
   for fold in range(nfolds):  
     # Get overall scores excluding nonwear
@@ -175,7 +175,6 @@ def cv_classification_report(infile, mode='binary'):
     ap = average_precision_score(true_prob, pred_prob, average='macro')
     metrics['precision'] += prec; metrics['recall'] += rec
     metrics['f1-score'] += fsc; metrics['accuracy'] += acc
-    metrics['AUC'] += auc
     metrics['AP'] += ap
 
     # Get metrics per class except Nonwear
@@ -186,8 +185,6 @@ def cv_classification_report(infile, mode='binary'):
       class_metrics[state]['recall'] += fold_class_metrics[state]['recall']
       class_metrics[state]['f1-score'] += fold_class_metrics[state]['f1-score']
       class_metrics[state]['samples'] += fold_class_metrics[state]['support']
-      auc = roc_auc_score(true_prob[:,idx], pred_prob[:,idx])
-      class_metrics[state]['AUC'] += auc
       ap = average_precision_score(true_prob[:,idx], pred_prob[:,idx])
       class_metrics[state]['AP'] += ap
  
@@ -198,18 +195,16 @@ def cv_classification_report(infile, mode='binary'):
 
   # Classwise report
   sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
-  print('\nClass\t\tPrecision\tRecall\t\tF1-score\tAUC\t\tAP\t\tSamples')
+  print('\nClass\t\tPrecision\tRecall\t\tF1-score\tAP\t\tSamples')
   for state in sleep_states:
     class_metrics[state]['precision'] = class_metrics[state]['precision'] / nfolds
     class_metrics[state]['recall'] = class_metrics[state]['recall'] / nfolds
     class_metrics[state]['f1-score'] = class_metrics[state]['f1-score'] / nfolds
-    class_metrics[state]['AUC'] = class_metrics[state]['AUC'] / nfolds
     class_metrics[state]['AP'] = class_metrics[state]['AP'] / nfolds
-    print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%d' % 
+    print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%d' % 
                       (state, class_metrics[state]['precision'],
                       class_metrics[state]['recall'], 
                       class_metrics[state]['f1-score'],
-                      class_metrics[state]['AUC'],
                       class_metrics[state]['AP'],
                       class_metrics[state]['samples']))
   print('\n')
@@ -333,7 +328,6 @@ def cv_hierarchical_classification_report(infile):
   
   for fold in range(nfolds):  
     true_prob = df[df['Fold'] == fold+1][true_cols].values.astype(int)
-    y_true = true_prob.argmax(axis=1)
     pred_prob = df[df['Fold'] == fold+1][pred_cols].values
     y_pred = []
     for i in tqdm(range(pred_prob.shape[0])):
