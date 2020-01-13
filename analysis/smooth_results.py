@@ -16,6 +16,7 @@ def main(argv):
     df[col] = 0.0
   for user in users:
     user_df = df[df['Users'] == user]  
+    user_df = user_df.sort_values(['Timestamp'])
     for col in pred_cols:
       sm_col = 'smooth_' + col.split('pred_')[1]
       timestamp = pd.to_datetime(user_df['Timestamp'], format='%Y-%m-%d %H:%M:%S.%f')
