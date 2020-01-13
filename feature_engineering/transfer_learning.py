@@ -19,6 +19,8 @@ def get_data(fname, feat_cols, sleep_states, mode='binary'):
   df = pd.read_csv(fname)  
   if mode == 'binary':
     df.loc[df['label'].isin(['REM','NREM 1','NREM 2','NREM 3']), 'label'] = 'Sleep'
+  elif mode == 'nonwear':
+    df.loc[df['label'].isin(['Wake','REM','NREM 1','NREM 2','NREM 3']), 'label'] = 'Wear'
   df = df[df['label'].isin(sleep_states)].reset_index()
   X = df[feat_cols].values
   y = df['label']
@@ -33,9 +35,11 @@ def main(args):
     os.makedirs(os.path.join(args.outdir, 'models'))
 
   if args.mode == 'binary':
-    sleep_states = ['Wake','Sleep','Nonwear']
+    sleep_states = ['Wake','Sleep']
+  elif args.mode == 'multiclass':
+    sleep_states = ['Wake','NREM 1','NREM 2','NREM 3','REM']
   else:
-    sleep_states = ['Wake','NREM 1','NREM 2','NREM 3','REM','Nonwear']
+    sleep_states = ['Wear', 'Nonwear']
 
   feat_cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad',
                'ENMO_entropy1','ENMO_entropy2', 'ENMO_prevdiff', 'ENMO_nextdiff',
@@ -112,7 +116,7 @@ if __name__ == "__main__":
   parser.add_argument('--testmode', type=str, default='pretrain',
                       help='mode of transfer learning - pretrain or finetune')
   parser.add_argument('--modeldir', type=str, help='input directory to load pre-trained models')
-  parser.add_argument('--mode', type=str, default='binary', help='classification mode - binary/multiclass')
+  parser.add_argument('--mode', type=str, default='binary', help='classification mode - binary/multiclass/nonwear')
   parser.add_argument('--train', type=str, help='training data file for finetune')        
   parser.add_argument('--val', type=str, help='validation data file for finetune')        
   parser.add_argument('--test', type=str, help='test data file for pretrain/finetune')        
