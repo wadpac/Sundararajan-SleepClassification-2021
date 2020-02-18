@@ -48,12 +48,15 @@ def main(argv):
   for cls in ctr:
     print('%s: %d (%0.2f%%)' % (cls,ctr[cls],ctr[cls]*100.0/len(df))) 
 
-  feat_cols = ['ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad',
-               'ENMO_entropy1','ENMO_entropy2', 'ENMO_prevdiff', 'ENMO_nextdiff',
-               'angz_mean','angz_std','angz_min','angz_max','angz_mad',
-               'angz_entropy1','angz_entropy2', 'angz_prevdiff', 'angz_nextdiff',
-               'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad',
-               'LIDS_entropy1','LIDS_entropy2', 'LIDS_prevdiff', 'LIDS_nextdiff']
+  feat_cols = ['ENMO_mean','ENMO_std','ENMO_range','ENMO_mad',
+               'ENMO_entropy1','ENMO_entropy2', 'ENMO_prev30diff', 'ENMO_next30diff',
+               'ENMO_prev60diff', 'ENMO_next60diff', 'ENMO_prev120diff', 'ENMO_next120diff',
+               'angz_mean','angz_std','angz_range','angz_mad',
+               'angz_entropy1','angz_entropy2', 'angz_prev30diff', 'angz_next30diff',
+               'angz_prev60diff', 'angz_next60diff', 'angz_prev120diff', 'angz_next120diff',
+               'LIDS_mean','LIDS_std','LIDS_range','LIDS_mad',
+               'LIDS_entropy1','LIDS_entropy2', 'LIDS_prev30diff', 'LIDS_next30diff',
+               'LIDS_prev60diff', 'LIDS_next60diff', 'LIDS_prev120diff', 'LIDS_next120diff']
 
   ######################## Partition the datasets #######################
 

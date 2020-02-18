@@ -41,14 +41,15 @@ def compute_entropy(df, bins=20):
   return ent
 
 # Get difference of feature with respect to prev or next interval
-def get_diff_feat(feature, direction='prev'):
+def get_diff_feat(feature, direction, time_diff, time_interval=30):
   diff = np.zeros(len(feature))
+  offset = int(time_diff / time_interval)
   if direction == 'prev':
     for i in range(1,len(feature)):
-      diff[i] = feature[i]-feature[i-1]
+        diff[i] = feature[i]-np.mean(feature[i-offset:i])
   else:
     for i in range(len(feature)-1):
-      diff[i] = feature[i+1]-feature[i]
+      diff[i] = np.mean(feature[i+1:i+offset+1])-feature[i]
 
   return diff
     
@@ -60,16 +61,22 @@ def get_stats(timestamp, feature, time_interval):
   feat_std = feat_df.resample(str(time_interval)+'S').std()
   feat_min = feat_df.resample(str(time_interval)+'S').min()
   feat_max = feat_df.resample(str(time_interval)+'S').max()
+  feat_range = feat_max['feature'] - feat_min['feature']
   feat_mad = feat_df.resample(str(time_interval)+'S').apply(pd.DataFrame.mad)
   feat_ent1 = feat_df.resample(str(time_interval)+'S')\
                               .apply(compute_entropy, bins=20)
   feat_ent2 = feat_df.resample(str(time_interval)+'S')\
                               .apply(compute_entropy, bins=200)
-  feat_prevdiff = get_diff_feat(feat_mean['feature'], 'prev')
-  feat_nextdiff = get_diff_feat(feat_mean['feature'], 'next')
-  stats = np.vstack((feat_mean['feature'], feat_std['feature'], feat_min['feature'], 
-                     feat_max['feature'], feat_mad['feature'], feat_ent1['feature'], 
-                     feat_ent2['feature'], feat_prevdiff, feat_nextdiff)).T
+  feat_prev30diff = get_diff_feat(feat_mean['feature'], 'prev', 30, time_interval)
+  feat_next30diff = get_diff_feat(feat_mean['feature'], 'next', 30, time_interval)
+  feat_prev60diff = get_diff_feat(feat_mean['feature'], 'prev', 60, time_interval)
+  feat_next60diff = get_diff_feat(feat_mean['feature'], 'next', 60, time_interval)
+  feat_prev120diff = get_diff_feat(feat_mean['feature'], 'prev', 120, time_interval)
+  feat_next120diff = get_diff_feat(feat_mean['feature'], 'next', 120, time_interval)
+  stats = np.vstack((feat_mean['feature'], feat_std['feature'], feat_range, 
+                     feat_mad['feature'], feat_ent1['feature'], feat_ent2['feature'],
+                     feat_prev30diff, feat_next30diff, feat_prev60diff, 
+                     feat_next60diff, feat_prev120diff, feat_next120diff)).T
 
   # return index and stats
   return np.array(feat_mean.index.values, dtype='str'), stats
@@ -154,12 +161,15 @@ def main(argv):
     
     # Write features to CSV file
     data = np.hstack((timestamp_valid.reshape(-1,1), feat_valid, label_valid.reshape(-1,1)))
-    cols = ['timestamp','ENMO_mean','ENMO_std','ENMO_min','ENMO_max','ENMO_mad',
-            'ENMO_entropy1','ENMO_entropy2','ENMO_prevdiff','ENMO_nextdiff', 
-            'angz_mean','angz_std','angz_min','angz_max','angz_mad',
-            'angz_entropy1','angz_entropy2','angz_prevdiff','angz_nextdiff', 
-            'LIDS_mean','LIDS_std','LIDS_min','LIDS_max','LIDS_mad',
-            'LIDS_entropy1','LIDS_entropy2','LIDS_prevdiff','LIDS_nextdiff','label']
+    cols = ['timestamp','ENMO_mean','ENMO_std','ENMO_range','ENMO_mad',
+            'ENMO_entropy1','ENMO_entropy2','ENMO_prev30diff','ENMO_next30diff',
+            'ENMO_prev60diff', 'ENMO_next60diff', 'ENMO_prev120diff', 'ENMO_next120diff',  
+            'angz_mean','angz_std','angz_range','angz_mad',
+            'angz_entropy1','angz_entropy2','angz_prev30diff','angz_next30diff', 
+            'angz_prev60diff', 'angz_next60diff', 'angz_prev120diff', 'angz_next120diff',  
+            'LIDS_mean','LIDS_std','LIDS_range','LIDS_mad',
+            'LIDS_entropy1','LIDS_entropy2','LIDS_prev30diff','LIDS_next30diff',
+            'LIDS_prev60diff', 'LIDS_next60diff', 'LIDS_prev120diff', 'LIDS_next120diff', 'label']
     df = pd.DataFrame(data=data, columns=cols)
     
     if dataset == 'Newcastle':
@@ -182,10 +192,10 @@ def main(argv):
   
     # Save data to CSV
     if idx == 0:
-      df.to_csv(os.path.join(outdir,'sleep_data_' + str(time_interval) + 's.csv'),
+      df.to_csv(os.path.join(outdir,'features_' + str(time_interval) + 's.csv'),
                 sep=',', mode='w', index=False, header=True)
     else:
-      df.to_csv(os.path.join(outdir,'sleep_data_' + str(time_interval) + 's.csv'),
+      df.to_csv(os.path.join(outdir,'features_' + str(time_interval) + 's.csv'),
                 sep=',', mode='a', index=False, header=False)
     
 if __name__ == "__main__":
