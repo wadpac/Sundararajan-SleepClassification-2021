@@ -11,6 +11,7 @@ from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
+from sklearn.utils.class_weight import compute_class_weight
 
 from imblearn.over_sampling import SMOTE
 
@@ -85,6 +86,9 @@ def main(argv):
     out_fold_ts_test = ts[test_indices]
     out_fold_fnames_test = fnames[test_indices]
 
+    class_wt = compute_class_weight('balanced', np.unique(out_fold_y_train), out_fold_y_train)
+    class_wt = {i:val for i,val in enumerate(class_wt)}
+
     # Inner CV
     strat_kfold = StratifiedKFold(n_splits=inner_cv_splits, random_state=0,
                                   shuffle=True)       
@@ -121,6 +125,7 @@ def main(argv):
     scaler.fit(out_fold_X_train)
     out_fold_X_train_sc = scaler.transform(out_fold_X_train)
     out_fold_X_test_sc = scaler.transform(out_fold_X_test)
+    
 
     # Resample training data
     print('Fold'+str(out_fold)+' - Balanced: SMOTE')
@@ -137,7 +142,7 @@ def main(argv):
       custom_resamp_cv_indices.append((grp_train_idx, grp_test_idx))
 
     # Note: imblearn Pipeline is slow and sklearn pipeline yields poor results 
-    clf = RandomForestClassifier(class_weight='balanced',
+    clf = RandomForestClassifier(class_weight=class_wt,
                              max_depth=None, random_state=0)
 
     print('Fold'+str(out_fold)+' - Balanced: Hyperparameter search')
