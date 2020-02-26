@@ -149,8 +149,8 @@ def main(argv):
                              max_depth=None, random_state=0)
 
     print('Fold'+str(out_fold)+' - Balanced: Hyperparameter search')
-    search_params = {'n_estimators':[50,100,200,300,500],
-                 'max_depth': [5,10,None]}
+    search_params = {'n_estimators':[50,100,200,300,500,700],
+                 'max_depth': [5,10,15,None]}
     cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params,
                             cv=custom_resamp_cv_indices, scoring='f1_macro',
                             n_iter=5, n_jobs=-1, verbose=2)
