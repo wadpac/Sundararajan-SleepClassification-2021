@@ -17,8 +17,7 @@ from sklearn_hierarchical_classification.constants import ROOT
 from sklearn_hierarchical_classification.metrics import h_fbeta_score, multi_labeled, fill_ancestors
 
 sys.path.append('../analysis/')
-from analysis import cv_save_classification_result
-
+from analysis import cv_save_classification_result, custom_h_fbeta
 from tqdm import tqdm
 import networkx as nx
 from networkx import DiGraph
