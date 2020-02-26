@@ -46,10 +46,10 @@ def get_diff_feat(feature, direction, time_diff, time_interval=30):
   offset = int(time_diff / time_interval)
   if direction == 'prev':
     for i in range(1,len(feature)):
-        diff[i] = feature[i]-np.mean(feature[i-offset:i])
+      diff[i] = feature[i]-np.mean(feature[max(0,i-offset):i])
   else:
     for i in range(len(feature)-1):
-      diff[i] = np.mean(feature[i+1:i+offset+1])-feature[i]
+      diff[i] = np.mean(feature[i+1:min(len(feature),i+offset+1)])-feature[i]
 
   return diff
     
