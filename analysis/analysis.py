@@ -370,5 +370,3 @@ def cv_hierarchical_classification_report(infile):
                       class_metrics[state]['AP'],
                       class_metrics[state]['samples']))
   print('\n')
-  
-  
