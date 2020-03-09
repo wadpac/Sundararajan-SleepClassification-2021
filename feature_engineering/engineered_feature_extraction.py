@@ -33,25 +33,42 @@ def get_LIDS(timestamp, ENMO):
   # 30-minute rolling average
   LIDS = df['LIDS_unfiltered'].rolling('1800s').mean().values
   return LIDS
+  
+def mad(data):
+  out = np.mean(np.absolute(data - np.mean(data)))
+  return out  
 
-def compute_entropy(df, bins=20):
-  hist, bin_edges = np.histogram(df, bins=bins)
+def compute_entropy(data, bins=20):
+  bins = int(bins)
+  hist, bin_edges = np.histogram(data, bins=bins)
   p = hist/float(hist.sum())
   ent = entropy(p)
-  return ent
+  return ent 
 
 # Get difference of feature with respect to prev or next interval
 def get_diff_feat(feature, direction, time_diff, time_interval=30):
-  diff = np.zeros(len(feature))
-  offset = int(time_diff / time_interval)
+  window = int(time_diff / float(time_interval))
+  mean_feature = feature.rolling(window).mean().values
+  feature = feature.values.reshape(-1,1)
+  mean_feature = mean_feature.reshape(-1,1)
+  diff = np.zeros(feature.shape)
   if direction == 'prev':
-    for i in range(1,len(feature)):
-      diff[i] = feature[i]-np.mean(feature[max(0,i-offset):i])
+    # Compute mean for border conditions
+    for i in range(0,window-1):
+      mean_feature[i] = np.mean(feature[:i+1])
   else:
-    for i in range(len(feature)-1):
-      diff[i] = np.mean(feature[i+1:min(len(feature),i+offset+1)])-feature[i]
+    # Shift mean feature by window
+    mean_feature = np.vstack((mean_feature[window-1:].reshape(-1,1),\
+                              mean_feature[:window-1].reshape(-1,1)))
+    # Compute mean for border conditions
+    for i in range(len(feature)-window+1,len(feature)):
+      mean_feature[i] = np.mean(feature[i:])
+  if direction == 'prev':
+    diff[1:] = feature[1:] - mean_feature[:-1]
+  else:
+    diff[:-1] = mean_feature[1:] - feature[:-1]
 
-  return diff
+  return diff.reshape(-1,)
     
 # Aggregate statistics of features over a given time interval
 def get_stats(timestamp, feature, time_interval):
@@ -62,7 +79,7 @@ def get_stats(timestamp, feature, time_interval):
   feat_min = feat_df.resample(str(time_interval)+'S').min()
   feat_max = feat_df.resample(str(time_interval)+'S').max()
   feat_range = feat_max['feature'] - feat_min['feature']
-  feat_mad = feat_df.resample(str(time_interval)+'S').apply(pd.DataFrame.mad)
+  feat_mad = feat_df.resample(str(time_interval)+'S').apply(mad)
   feat_ent1 = feat_df.resample(str(time_interval)+'S')\
                               .apply(compute_entropy, bins=20)
   feat_ent2 = feat_df.resample(str(time_interval)+'S')\
@@ -123,7 +140,7 @@ def main(argv):
     z = np.array(fh['Z'])
     timestamp = pd.Series(fh['DateTime']).apply(lambda x: x.decode('utf8'))
     timestamp = pd.to_datetime(timestamp, format='%Y-%m-%d %H:%M:%S.%f')
-    
+   
     # Get ENMO and acceleration angles
     ENMO = get_ENMO(x,y,z)
     angle_x, angle_y, angle_z = get_tilt_angles(x,y,z)
@@ -135,7 +152,8 @@ def main(argv):
     _, angle_z_stats = get_stats(timestamp, angle_z, time_interval)
     timestamp_agg, LIDS_stats = get_stats(timestamp, LIDS, time_interval)
     feat = np.hstack((ENMO_stats, angle_z_stats, LIDS_stats))
-           
+    end = time.time()
+
     # Get nonwear for each interval
     nonwear = np.array(fh['Nonwear'])
     nonwear_agg = get_dominant_categ(timestamp, nonwear, time_interval, default=True)
@@ -153,7 +171,7 @@ def main(argv):
     label_agg = get_dominant_categ(timestamp, label, time_interval)
     label_agg[(np.isin(label_agg, states, invert=True))
               & (nonwear_agg == True)] = 'Nonwear'
-      
+
     # Get valid timestamps, features and labels
     timestamp_valid = timestamp_agg[label_agg != 'NaN'].reshape(-1,1)
     feat_valid = feat[label_agg != 'NaN',:]
