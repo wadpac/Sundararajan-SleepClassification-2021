@@ -22,8 +22,8 @@ def main(argv):
     st_hist = st_hist / float(state_true.sum())
     st_bins = (st_edges[:-1] + st_edges[1:])/2.0
     plt.plot(st_bins, st_hist, linewidth=2)
-    plt.xlabel([0,1])
-    plt.ylabel([0,1])
+    plt.xlim([0,1])
+    plt.ylim([0,0.2])
     plt.xlabel('Predicted probability')
     plt.ylabel('Normalized frequency')
     plt.title(state, fontsize=30)
