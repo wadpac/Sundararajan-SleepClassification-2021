@@ -10,6 +10,7 @@ def main(argv):
   df = pd.read_csv(infile)
 
   labels = list(df['label'].values)
+  print(Counter(labels))
   sleep_states = ['Wake','NREM 1','NREM 2','NREM 3','REM']
   ctr = Counter(labels)
   ctr = {key:val for key,val in ctr.items() if key in sleep_states}
