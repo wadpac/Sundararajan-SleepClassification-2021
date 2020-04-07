@@ -129,7 +129,7 @@ def main(args):
                        dtype=np.float32, shape=(samples, args.steps, args.channels))
   samples2 = np.memmap(os.path.join(args.outdir,'samples2_'+argstr+'.npy'), mode='w+',\
                        dtype=np.float32, shape=(samples, args.steps, args.channels))
-  labels = np.memmap(os.path.join(args.outdir,'labels_'+str(samples)+'.npy'), mode='w+',\
+  labels = np.memmap(os.path.join(args.outdir,'labels_'+argstr+'.npy'), mode='w+',\
                        dtype=np.int32, shape=(samples,))
   
   nsamp = 0
