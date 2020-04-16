@@ -47,7 +47,7 @@ class DataGenerator(Sequence):
     indices = self.indices[st_idx:end_idx]
     # Generate data
     X1, X2, y = self.__data_generation__(indices)
-    return X1, X2, y
+    return (X1, X2), y
 
   def __data_generation__(self, indices):
     'Generates data containing batch_size samples'
@@ -132,7 +132,7 @@ class DataGenerator(Sequence):
         X2[i] = self.samples2[idx,:,:]
         y[i] = self.labels[idx]
 
-    return X1, X2, to_categorical(y, num_classes=self.classes)
+    return X1, X2, y#to_categorical(y, num_classes=self.classes)
   
   def on_epoch_end(self):
     'Updates indexes after each epoch'
