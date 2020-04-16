@@ -10,7 +10,7 @@ use_python("C:/Users/KalaivaniSundararaja/Anaconda3/envs/GGIR/", required=TRUE)
 sys <- import("sys", convert = FALSE)
 sys$path$append(".") # path for features.py and utils.py
 
-source("C:/Research/actigraphy/code/ggir_ext/get_sleep_stage.R")
+source("C:/Research/actigraphy/code/SleepStageClassification/ggir_ext/get_sleep_stage.R")
 myfun = list(FUN=get_sleep_stage,
              parameters= c(30,'C:/Research/actigraphy/data/results/all/models','binary'), #time interval for feature aggregation, path to model directory, mode (binary, nonwear, multiclass)
              expected_sample_rate= 30,
@@ -23,7 +23,7 @@ myfun = list(FUN=get_sleep_stage,
              timestamp=T)
 library("GGIR")
 g.shell.GGIR(datadir="C:/Research/actigraphy/data/psgnewcastle2015/test_acc/",
-             outputdir="C:/Research/actigraphy/code/ggir_ext/myresults",
+             outputdir="C:/Research/actigraphy/code/SleepStageClassification/ggir_ext/myresults",
              mode=1:2,
              epochvalues2csv = TRUE,
              do.report=2,
