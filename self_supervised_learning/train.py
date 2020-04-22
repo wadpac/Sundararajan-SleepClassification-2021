@@ -3,10 +3,11 @@ import numpy as np
 import random
 import argparse
 from collections import Counter
+from sklearn.metrics import accuracy_score
 
 import tensorflow as tf
 from tensorflow.keras import Input, Model
-from tensorflow.keras.layers import Dense, Lambda
+from tensorflow.keras.layers import Dense, Lambda, Dropout
 from tensorflow.keras.models import load_model
 from tensorflow.keras.losses import BinaryCrossentropy
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
@@ -17,7 +18,7 @@ from tensorflow.keras.initializers import glorot_uniform
 
 import matplotlib.pyplot as plt
 
-from FCN import FCN
+from resnet import Resnet
 from datagenerator import DataGenerator
 from callbacks import BatchRenormScheduler
 
@@ -36,7 +37,7 @@ def plot_results(train_result, val_result, out_fname, metric='Loss'):
   plt.title(metric)
   plt.ylabel(metric)
   plt.xlabel('Epochs')
-  ylim = 1.0 if metric != 'Loss' else 5.0
+  ylim = 1.0 if metric != 'Loss' else 3.0
   plt.ylim(0,ylim)
   plt.legend(['Train', 'Val'], loc='upper right')
   plt.savefig(out_fname)
@@ -108,18 +109,18 @@ def main(argv):
   # Data generators for train/val/test
   train_gen = DataGenerator(train_samples1, train_samples2, train_labels,\
                             batch_size=batch_size, seqlen=seqlen, channels=channels,\
-                            shuffle=True, augment=False, aug_factor=0.75)
+                            shuffle=True, balance=True, augment=False, aug_factor=0.25)
   val_gen = DataGenerator(val_samples1, val_samples2, val_labels,\
                           batch_size=batch_size, seqlen=seqlen, channels=channels)
   test_gen = DataGenerator(test_samples1, test_samples2, test_labels,\
                            batch_size=batch_size, seqlen=seqlen, channels=channels)
-  
+
   # Create model
-  fcn_model = FCN(input_shape=(seqlen, channels), norm_max=args.maxnorm)
+  resnet_model = Resnet(input_shape=(seqlen, channels), norm_max=args.maxnorm)
   samp1 = Input(shape=(seqlen, channels))
-  enc_samp1 = fcn_model(samp1)
+  enc_samp1 = resnet_model(samp1)
   samp2 = Input(shape=(seqlen, channels))
-  enc_samp2 = fcn_model(samp2)
+  enc_samp2 = resnet_model(samp2)
   diff_layer = Lambda(lambda tensors:K.abs(tensors[0] - tensors[1]))
   diff_enc = diff_layer([enc_samp1, enc_samp2])
 
@@ -127,6 +128,7 @@ def main(argv):
                  kernel_constraint=MaxNorm(args.maxnorm,axis=[0,1]),
                  bias_constraint=MaxNorm(args.maxnorm,axis=0),
                  kernel_initializer=glorot_uniform(seed=0))(diff_enc)
+  dense_out = Dropout(rate=0.2)(dense_out)
   output = Dense(1,activation='sigmoid',
                  kernel_constraint=MaxNorm(args.maxnorm,axis=[0,1]),
                  bias_constraint=MaxNorm(args.maxnorm,axis=0),
@@ -160,7 +162,9 @@ def main(argv):
   model.load_weights(os.path.join(resultdir,best_model_file))
   probs = model.predict(test_gen)
   y_pred = probs.argmax(axis=1)
-  y_true = fold_labels[test_indices]
+  y_true = test_labels
+  test_acc = accuracy_score(y_true, y_pred)
+  print('Test accuracy = {:0.2f}'.format(test_acc*100.0))
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
