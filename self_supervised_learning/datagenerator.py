@@ -6,7 +6,7 @@ from transforms import get_ENMO, get_angle_z, get_LIDS
 
 class DataGenerator(Sequence):
   def __init__(self, samples1, samples2, labels, classes=2, batch_size=32, seqlen=100, channels=3,\
-               shuffle=False, augment=False, aug_factor=0.0):
+               shuffle=False, balance=False, augment=False, aug_factor=0.0):
     'Initialization'
     self.seqlen = seqlen
     self.batch_size = batch_size
@@ -16,6 +16,7 @@ class DataGenerator(Sequence):
     self.labels = labels
     self.channels = channels
     self.shuffle = shuffle
+    self.balance = balance
     self.augment = augment
     self.aug_factor = 0.0
     if self.augment == True:
@@ -38,15 +39,31 @@ class DataGenerator(Sequence):
       assert self.aug_factor > 0.0
     aug_factor = 1.0 + self.aug_factor
     orig_sz = int(self.batch_size / aug_factor) # reduced batch size if aug_factor > 1
+    
     # Generate indices of the batch
-    st_idx = index*orig_sz
-    if (index+1)*orig_sz <= (len(self.indices)-1):
-      end_idx = (index+1)*orig_sz
-    else:
-      end_idx = len(self.indices)
-    indices = self.indices[st_idx:end_idx]
+    if self.balance == False: # For inference
+      st_idx = index*orig_sz
+      if (index+1)*orig_sz <= (len(self.indices)-1):
+        end_idx = (index+1)*orig_sz
+      else:
+        end_idx = len(self.indices)
+      indices = self.indices[st_idx:end_idx]
+    else: # Balance each minibatch to have same number of classes
+      cls_sz = int((self.batch_size / aug_factor) // self.classes)
+      if cls_sz * aug_factor * self.classes < self.batch_size:
+        cls_sz += 1
+      # Generate indices with balanced classes
+      indices = []
+      for cls in range(self.classes):
+        cls_idx = self.indices[self.labels[self.indices] == cls]
+        indices.extend(np.random.choice(cls_idx,cls_sz,replace=False))
+      # Choose batch sized indices
+      random.shuffle(indices)
+      indices = np.array(indices[:orig_sz])
+    
     # Generate data
     X1, X2, y = self.__data_generation__(indices)
+    
     return (X1, X2), y
 
   def __data_generation__(self, indices):
@@ -103,19 +120,21 @@ class DataGenerator(Sequence):
           if toss == 1:
             aug_x1 = random.choice(self.aug_func)(aug_x1)
             aug_x2 = random.choice(self.aug_func)(aug_x2)
-        # Get feature channels from augmented raw_data
-        if self.channels > 3:    
-          ENMO = get_ENMO(aug_x1[:,:,0], aug_x1[:,:,1], aug_x1[:,:,2])[:,:,np.newaxis]          
-          angz = get_angle_z(aug_x1[:,:,0], aug_x1[:,:,1], aug_x1[:,:,2])[:,:,np.newaxis]         
-          LIDS = get_LIDS(aug_x1[:,:,0], aug_x1[:,:,1], aug_x1[:,:,2])[:,:,np.newaxis] 
-          aug_x1 = np.concatenate((aug_x1, ENMO, angz, LIDS), axis=-1) 
-          ENMO = get_ENMO(aug_x2[:,:,0], aug_x2[:,:,1], aug_x2[:,:,2])[:,:,np.newaxis]          
-          angz = get_angle_z(aug_x2[:,:,0], aug_x2[:,:,1], aug_x2[:,:,2])[:,:,np.newaxis]         
-          LIDS = get_LIDS(aug_x2[:,:,0], aug_x2[:,:,1], aug_x2[:,:,2])[:,:,np.newaxis] 
-          aug_x2 = np.concatenate((aug_x2, ENMO, angz, LIDS), axis=-1) 
-        X1[offset+N:offset+N+aug_sz[cls],:,:] = aug_x1
-        X2[offset+N:offset+N+aug_sz[cls],:,:] = aug_x2
-        offset += samp_sz[cls] + aug_sz[cls]
+          # Get feature channels from augmented raw_data
+          if self.channels > 3:    
+            ENMO = get_ENMO(aug_x1[:,:,0], aug_x1[:,:,1], aug_x1[:,:,2])[:,:,np.newaxis]          
+            angz = get_angle_z(aug_x1[:,:,0], aug_x1[:,:,1], aug_x1[:,:,2])[:,:,np.newaxis]         
+            LIDS = get_LIDS(aug_x1[:,:,0], aug_x1[:,:,1], aug_x1[:,:,2])[:,:,np.newaxis] 
+            aug_x1 = np.concatenate((aug_x1, ENMO, angz, LIDS), axis=-1) 
+            ENMO = get_ENMO(aug_x2[:,:,0], aug_x2[:,:,1], aug_x2[:,:,2])[:,:,np.newaxis]          
+            angz = get_angle_z(aug_x2[:,:,0], aug_x2[:,:,1], aug_x2[:,:,2])[:,:,np.newaxis]         
+            LIDS = get_LIDS(aug_x2[:,:,0], aug_x2[:,:,1], aug_x2[:,:,2])[:,:,np.newaxis] 
+            aug_x2 = np.concatenate((aug_x2, ENMO, angz, LIDS), axis=-1) 
+          X1[offset+N:offset+N+aug_sz[cls],:,:] = aug_x1
+          X2[offset+N:offset+N+aug_sz[cls],:,:] = aug_x2
+          offset += aug_sz[cls]
+        offset += samp_sz[cls]
+
       # Shuffle original and augmented data
       idx = np.arange(self.batch_size)
       np.random.shuffle(idx)
@@ -124,15 +143,11 @@ class DataGenerator(Sequence):
       y = y[idx]
     else: 
       # Initialization
-      X1 = np.zeros((len(indices), self.seqlen, self.channels))
-      X2 = np.zeros((len(indices), self.seqlen, self.channels))
-      y = np.ones((len(indices)), dtype=int) * -1
-      for i, idx in enumerate(indices):
-        X1[i] = self.samples1[idx,:,:]
-        X2[i] = self.samples2[idx,:,:]
-        y[i] = self.labels[idx]
+      X1 = self.samples1[indices,:,:]
+      X2 = self.samples2[indices,:,:]
+      y = self.labels[indices]
 
-    return X1, X2, y#to_categorical(y, num_classes=self.classes)
+    return X1, X2, y
   
   def on_epoch_end(self):
     'Updates indexes after each epoch'
