@@ -96,11 +96,13 @@ def main(argv):
   confusion_mat = confusion_mat*100.0 / nfolds
 
   # Plot confusion matrix
+  plot_labels = ['Nonwear', 'Wear', 'Wake', 'Sleep', 'NREM', 'REM',\
+                 'N1+N2', 'N3', 'N1', 'N2']
   plt.imshow(confusion_mat, interpolation='nearest', cmap=plt.cm.Blues, aspect='auto')
   plt.colorbar()
   tick_marks = np.arange(len(sleep_states))
-  plt.xticks(tick_marks, plot_states, rotation=45)
-  plt.yticks(tick_marks, plot_states)
+  plt.xticks(tick_marks, plot_labels, rotation=45)
+  plt.yticks(tick_marks, plot_labels)
 
   thresh = confusion_mat.max() / 2.0
   for i, j in itertools.product(range(confusion_mat.shape[0]), range(confusion_mat.shape[1])):
