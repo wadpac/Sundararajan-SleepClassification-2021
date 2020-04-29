@@ -4,7 +4,7 @@ import sys,os
 import pandas as pd
 import numpy as np
 from collections import Counter
-import pickle
+import joblib
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import RandomizedSearchCV
@@ -113,8 +113,8 @@ def main(argv):
 #                            cv=custom_cv_indices, scoring='f1_macro', n_iter=5,
 #                            n_jobs=-1, verbose=2)
 #    cv_clf.fit(out_fold_X_train, out_fold_y_train)
-#    pickle.dump(cv_clf, open(os.path.join(resultdir,\
-#                'fold'+str(out_fold)+'_'+ mode + '_imbalanced_RF.sav'),'wb'))
+#    joblib.dump(cv_clf, os.path.join(resultdir,\
+#                'fold'+str(out_fold)+'_'+ mode + '_imbalanced_RF.sav')
 #    out_fold_y_test_pred = cv_clf.predict_proba(out_fold_X_test)
 #    print('Fold'+str(out_fold)+' - Imbalanced', cv_clf.best_params_)
 #
@@ -155,8 +155,8 @@ def main(argv):
                             cv=custom_resamp_cv_indices, scoring='f1_macro',
                             n_iter=5, n_jobs=-1, verbose=2)
     cv_clf.fit(out_fold_X_train_resamp, out_fold_y_train_resamp)
-    pickle.dump([scaler,cv_clf], open(os.path.join(resultdir,\
-                'fold'+str(out_fold)+'_'+ mode + '_balanced_RF.sav'),'wb'))
+    joblib.dump([scaler,cv_clf], os.path.join(resultdir,\
+                'fold'+str(out_fold)+'_'+ mode + '_balanced_RF.sav'))
     out_fold_y_test_pred = cv_clf.predict_proba(out_fold_X_test_sc)
     print('Fold'+str(out_fold)+' - Balanced', cv_clf.best_params_)
 
