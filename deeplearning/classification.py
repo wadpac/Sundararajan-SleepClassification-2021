@@ -4,6 +4,7 @@ import pandas as pd
 import random
 import argparse
 from collections import Counter
+from tqdm import tqdm
 
 import tensorflow as tf
 from tensorflow.keras.models import load_model
@@ -41,7 +42,7 @@ def plot_results(fold, train_result, val_result, out_fname, metric='Loss'):
   plt.title('{} for fold {}'.format(metric, fold))
   plt.ylabel(metric)
   plt.xlabel('Epochs')
-  ylim = 1.0 if metric != 'Loss' else 5.0
+  ylim = 1.0 #if metric != 'Loss' else 5.0
   plt.ylim(0,ylim)
   plt.legend(['Train', 'Val'], loc='upper right')
   plt.savefig(out_fname)
@@ -197,7 +198,7 @@ def main(argv):
                               n_classes=num_classes, shuffle=True)
     mean, std = stat_gen.fit()
     np.savez(os.path.join(resultdir,'Fold'+str(fold+1)+'_stats'), mean=mean, std=std)
-    
+
     # Data generators for train/val/test
     train_gen = DataGenerator(train_indices, raw_data, fold_labels, valid_states, partition='train',\
                               batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
@@ -215,7 +216,7 @@ def main(argv):
     # across entire dataset is time-consuming
     model = FCN(input_shape=(seqlen,num_channels+feat_channels), max_seqlen=max_seqlen,
                 num_classes=len(valid_states), norm_max=args.maxnorm)
-    #print(model.summary())
+    #print(model.summary()); exit()
     model.compile(optimizer=Adam(lr=lr),
                   loss=focal_loss(),
                   metrics=['accuracy', macro_f1])

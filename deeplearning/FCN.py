@@ -1,7 +1,7 @@
 from tensorflow import keras
 from tensorflow.keras import Input, Sequential, Model
-from tensorflow.keras.layers import Dense, Activation, Conv1D, Lambda, Conv2DTranspose, LeakyReLU,\
-                                    Add, BatchNormalization, GlobalAveragePooling1D, ZeroPadding1D, Dropout
+from tensorflow.keras.layers import Dense, Activation, Conv1D, Lambda, Conv2DTranspose, LeakyReLU, Flatten,\
+                                    Add, BatchNormalization, MaxPooling1D, GlobalAveragePooling1D, ZeroPadding1D, Dropout
 from tensorflow.keras.initializers import glorot_uniform
 from tensorflow.keras.regularizers import l2
 import tensorflow.keras.backend as K
@@ -209,9 +209,16 @@ def FCN(input_shape, max_seqlen, num_classes=2, norm_max=1.0):
 #  x = identity_block(x, ksz=3, filters=[256,256,512], stage=5, block='f')
 
   # Output stage
-  x = Conv1DTranspose(x, filters=64, ksz=5, s=4, norm_max=norm_max)
-  x = GlobalAveragePooling1D()(x)
-  outputs = Dense(num_classes, activation='softmax', name='Dense',
+  #x = Conv1DTranspose(x, filters=64, ksz=5, s=4, norm_max=norm_max)
+  #x = GlobalAveragePooling1D()(x)
+  x = MaxPooling1D(pool_size=2)(x)
+  x = Flatten()(x)
+  x = Dense(units=100, activation='relu', name='Dense1',
+                  kernel_constraint=MaxNorm(norm_max,axis=[0,1]),
+                  bias_constraint=MaxNorm(norm_max,axis=0),
+                  kernel_initializer=glorot_uniform(seed=0))(x)
+  x = Dropout(rate=0.2)(x)
+  outputs = Dense(num_classes, activation='softmax', name='Dense_out',
                   kernel_constraint=MaxNorm(norm_max,axis=[0,1]),
                   bias_constraint=MaxNorm(norm_max,axis=0),
                   kernel_initializer=glorot_uniform(seed=0))(x)

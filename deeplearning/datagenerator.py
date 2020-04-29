@@ -68,7 +68,6 @@ class DataGenerator(Sequence):
       
     # Generate data
     X, y = self.__data_generation__(indices)
-
     return X, y
 
   def __data_generation__(self, indices):

@@ -3,18 +3,24 @@ import numpy as np
 import random
 import argparse
 from collections import Counter
+from sklearn.metrics import accuracy_score
 
 import tensorflow as tf
+from tensorflow.keras import Input, Model
+from tensorflow.keras.layers import Dense, Lambda, Dropout
 from tensorflow.keras.models import load_model
+from tensorflow.keras.losses import BinaryCrossentropy
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 import tensorflow.keras.backend as K
+from tensorflow.keras.constraints import MaxNorm
+from tensorflow.keras.initializers import glorot_uniform
 
 import matplotlib.pyplot as plt
 
-from FCN import FCN
+from resnet import Resnet
 from datagenerator import DataGenerator
-from callbacks import Metrics, BatchRenormScheduler
+from callbacks import BatchRenormScheduler
 
 np.random.seed(2)
 
@@ -24,45 +30,24 @@ if gpus:
   tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
   tf.config.experimental.set_memory_growth(gpus[0], True)
 
-def plot_results(fold, train_result, val_result, out_fname, metric='Loss'):
+def plot_results(train_result, val_result, out_fname, metric='Loss'):
   plt.Figure()
   plt.plot(train_result, label='train')
   plt.plot(val_result, label='val')
-  plt.title('{} for fold {}'.format(metric, fold))
+  plt.title(metric)
   plt.ylabel(metric)
   plt.xlabel('Epochs')
-  ylim = 1.0 if metric != 'Loss' else 5.0
+  ylim = 1.0 if metric != 'Loss' else 3.0
   plt.ylim(0,ylim)
   plt.legend(['Train', 'Val'], loc='upper right')
   plt.savefig(out_fname)
   plt.clf()
 
-def get_partition(data, labels, users, sel_users, states, mode, is_train=False):
-  state_indices = [i for i,state in enumerate(states)]
-  indices = np.arange(len(users))[np.isin(users, sel_users) & np.isin(labels, state_indices)]
-  if mode != 'nonwear':
-    wake_idx = states.index('Wake')
-    wake_ext_idx = states.index('Wake_ext')
-  if is_train and mode != 'nonwear': # use extra wake samples only for training
-    # Determine LIDS score of wake samples  
-    wake_indices = indices[labels[indices] == wake_idx]
-    wake_samp = data[wake_indices,:,5].mean(axis=1) # LIDS mean
-    wake_perc = np.percentile(wake_samp,50)
-    # Choose extra wake samples whose LIDS score is less than 50% percentile of LIDS score of wake samples
-    wake_ext_indices = indices[labels[indices] == wake_ext_idx]
-    wake_ext_samp = data[wake_ext_indices,:,5].mean(axis=1) # LIDS mean
-    valid_indices = wake_ext_indices[wake_ext_samp < wake_perc]
-    indices = np.concatenate((indices[labels[indices] != wake_ext_idx], np.array(valid_indices)))
-  elif mode != 'nonwear':
-    indices = indices[labels[indices] != wake_ext_idx]
-  
-  return indices
-
-def get_best_model(indir, fold, mode='max'):
+def get_best_model(indir, mode='max'):
   files = os.listdir(indir)
-  files = [fname for fname in files if fname.startswith('fold'+str(fold)) and fname.endswith('.h5')]
-  metric = np.array([float(fname.split('.h5')[0].split('-')[2]) for fname in files])
-  epoch = np.array([int(fname.split('.h5')[0].split('-')[1]) for fname in files])
+  files = [fname for fname in files if fname.endswith('.h5')]
+  metric = np.array([float(fname.split('.h5')[0].split('-')[1]) for fname in files])
+  epoch = np.array([int(fname.split('.h5')[0].split('-')[0]) for fname in files])
   best_idx = np.argmax(metric) if mode == 'max' else np.argmin(metric)
   return files[best_idx], epoch[best_idx], metric[best_idx]
 
@@ -75,7 +60,8 @@ def main(argv):
   if not os.path.exists(outdir):
     os.makedirs(outdir)
 
-  resultdir = os.path.join(outdir,'models')
+  dirstr = 'lr{:.4f}-maxnorm{:.2f}-batchsize{:d}'.format(args.lr, args.maxnorm, args.batchsize)
+  resultdir = os.path.join(outdir,dirstr)
   if not os.path.exists(resultdir):
     os.makedirs(resultdir)
 
@@ -123,56 +109,62 @@ def main(argv):
   # Data generators for train/val/test
   train_gen = DataGenerator(train_samples1, train_samples2, train_labels,\
                             batch_size=batch_size, seqlen=seqlen, channels=channels,\
-                            shuffle=True, augment=True, aug_factor=0.75)
+                            shuffle=True, balance=True, augment=False, aug_factor=0.25)
   val_gen = DataGenerator(val_samples1, val_samples2, val_labels,\
                           batch_size=batch_size, seqlen=seqlen, channels=channels)
   test_gen = DataGenerator(test_samples1, test_samples2, test_labels,\
                            batch_size=batch_size, seqlen=seqlen, channels=channels)
-  
-  for i in range(len(train_gen)):
-      X1,X2,y = train_gen[i]
-      print(i+1, X1.shape, X2.shape, y.shape)
 
-#    # Create model
-#    # Use batchnorm as first step since computing mean and std 
-#    # across entire dataset is time-consuming
-#    model = FCN(input_shape=(seqlen,num_channels+feat_channels), max_seqlen=max_seqlen,
-#                num_classes=len(valid_states), norm_max=args.maxnorm)
-#    #print(model.summary())
-#    model.compile(optimizer=Adam(lr=lr),
-#                  loss=focal_loss(),
-#                  metrics=['accuracy', macro_f1])
-#
-#    # Train model
-#    # Use callback to compute F-scores over entire validation data
-#    metrics_cb = Metrics(val_data=val_gen, batch_size=batch_size)
-#    # Use early stopping and model checkpoints to handle overfitting and save best model
-#    model_checkpt = ModelCheckpoint(os.path.join(resultdir,'fold'+str(fold+1)+'_'+mode+'-{epoch:02d}-{val_f1:.4f}.h5'),\
-#                                                 monitor='val_f1',\
-#                                                 mode='max', save_best_only=True)
-#    batch_renorm_cb = BatchRenormScheduler(len(train_gen))
-#    history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
-#                        verbose=1, shuffle=False,
-#                        callbacks=[batch_renorm_cb, metrics_cb, model_checkpt],
-#                        workers=2, max_queue_size=20, use_multiprocessing=False)
-#
-#    # Plot training history
-#    plot_results(fold+1, history.history['loss'], history.history['val_loss'],\
-#                 os.path.join(resultdir,'Fold'+str(fold+1)+'_'+mode+'_loss.jpg'), metric='Loss')
-#    plot_results(fold+1, history.history['accuracy'], history.history['val_accuracy'],\
-#                 os.path.join(resultdir,'Fold'+str(fold+1)+'_'+mode+'_accuracy.jpg'), metric='Accuracy')
-#    plot_results(fold+1, history.history['macro_f1'], metrics_cb.val_f1,\
-#                 os.path.join(resultdir,'Fold'+str(fold+1)+'_'+mode+'_macro_f1.jpg'), metric='Macro F1')
-#    
-#    # Predict probability on validation data using best model
-#    best_model_file, epoch, val_f1 = get_best_model(resultdir, fold+1)
-#    print('Predicting with model saved at Epoch={:d} with val_f1={:0.4f}'.format(epoch, val_f1))
-#    model.load_weights(os.path.join(resultdir,best_model_file))
-#    probs = model.predict(test_gen)
-#    y_pred = probs.argmax(axis=1)
-#    y_true = fold_labels[test_indices]
-#    predictions.append((users[test_indices], data.iloc[test_indices]['timestamp'], 
-#                        data.iloc[test_indices]['filename'], test_indices, y_true, probs))
+  # Create model
+  resnet_model = Resnet(input_shape=(seqlen, channels), norm_max=args.maxnorm)
+  samp1 = Input(shape=(seqlen, channels))
+  enc_samp1 = resnet_model(samp1)
+  samp2 = Input(shape=(seqlen, channels))
+  enc_samp2 = resnet_model(samp2)
+  diff_layer = Lambda(lambda tensors:K.abs(tensors[0] - tensors[1]))
+  diff_enc = diff_layer([enc_samp1, enc_samp2])
+
+  dense_out = Dense(50,activation='relu',
+                 kernel_constraint=MaxNorm(args.maxnorm,axis=[0,1]),
+                 bias_constraint=MaxNorm(args.maxnorm,axis=0),
+                 kernel_initializer=glorot_uniform(seed=0))(diff_enc)
+  dense_out = Dropout(rate=0.2)(dense_out)
+  output = Dense(1,activation='sigmoid',
+                 kernel_constraint=MaxNorm(args.maxnorm,axis=[0,1]),
+                 bias_constraint=MaxNorm(args.maxnorm,axis=0),
+                 kernel_initializer=glorot_uniform(seed=0))(dense_out)
+  model = Model(inputs=[samp1,samp2], outputs=output)
+
+  model.compile(optimizer=Adam(lr=lr),
+                loss=BinaryCrossentropy(),
+                metrics=['accuracy'])
+
+  # Train model
+  # Use early stopping and model checkpoints to handle overfitting and save best model
+  model_checkpt = ModelCheckpoint(os.path.join(resultdir,'{epoch:02d}-{val_accuracy:.4f}.h5'),\
+                                               monitor='val_accuracy')#,\
+                                               #mode='max', save_best_only=True)
+  batch_renorm_cb = BatchRenormScheduler(len(train_gen)) # Implement batchrenorm after 1st epoch
+  history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
+                      verbose=1, shuffle=False,
+                      callbacks=[batch_renorm_cb, model_checkpt],
+                      workers=2, max_queue_size=20, use_multiprocessing=False)
+
+  # Plot training history
+  plot_results(history.history['loss'], history.history['val_loss'],\
+               os.path.join(resultdir,'loss.jpg'), metric='Loss')
+  plot_results(history.history['accuracy'], history.history['val_accuracy'],\
+               os.path.join(resultdir,'accuracy.jpg'), metric='Accuracy')
+  
+  # Predict probability on validation data using best model
+  best_model_file, epoch, val_accuracy = get_best_model(resultdir)
+  print('Predicting with model saved at Epoch={:d} with val_accuracy={:0.4f}'.format(epoch, val_accuracy))
+  model.load_weights(os.path.join(resultdir,best_model_file))
+  probs = model.predict(test_gen)
+  y_pred = probs.argmax(axis=1)
+  y_true = test_labels
+  test_acc = accuracy_score(y_true, y_pred)
+  print('Test accuracy = {:0.2f}'.format(test_acc*100.0))
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
