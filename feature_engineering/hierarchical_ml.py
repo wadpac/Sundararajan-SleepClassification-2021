@@ -2,7 +2,7 @@ import sys,os
 import pandas as pd
 import numpy as np
 from collections import Counter
-import pickle
+import joblib
 
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -119,8 +119,8 @@ def main(argv):
                        cv=custom_cv_indices, scoring=make_scorer(custom_h_fbeta,graph=graph), n_iter=5, \
                        n_jobs=-1, verbose=1)
     cv_clf.fit(out_fold_X_train, out_fold_y_train)
-    pickle.dump(cv_clf, open(os.path.join(resultdir,\
-                'fold'+str(out_fold)+'_hierarchical_RF.sav'),'wb'))
+    joblib.dump(cv_clf, os.path.join(resultdir,\
+                'fold'+str(out_fold)+'_hierarchical_RF.sav'))
     print('Predicting')
     out_fold_y_pred = cv_clf.predict(out_fold_X_test)
     out_fold_y_pred_prob = cv_clf.predict_proba(out_fold_X_test)
