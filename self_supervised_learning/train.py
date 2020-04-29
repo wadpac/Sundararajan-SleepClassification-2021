@@ -142,8 +142,8 @@ def main(argv):
   # Train model
   # Use early stopping and model checkpoints to handle overfitting and save best model
   model_checkpt = ModelCheckpoint(os.path.join(resultdir,'{epoch:02d}-{val_accuracy:.4f}.h5'),\
-                                               monitor='val_accuracy',\
-                                               mode='max', save_best_only=True)
+                                               monitor='val_accuracy')#,\
+                                               #mode='max', save_best_only=True)
   batch_renorm_cb = BatchRenormScheduler(len(train_gen)) # Implement batchrenorm after 1st epoch
   history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
                       verbose=1, shuffle=False,
