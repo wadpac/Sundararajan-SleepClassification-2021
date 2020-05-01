@@ -107,34 +107,12 @@ def get_pairs(df, span=30, steps=1500, tpos=180, tneg=360):
   return samp1, samp2, lbl
 
 def main(args):
-  # Get number of samples  
-  samples = 0
-  files = os.listdir(args.indir)
-  for fname in files:
-    print('Counting ' + fname)
-    fh = h5py.File(os.path.join(args.indir,fname), 'r')
-    x = np.array(fh['X'])
-    timestamp = pd.Series(fh['DateTime']).apply(lambda x: x.decode('utf8'))
-    timestamp = pd.to_datetime(timestamp, format='%Y-%m-%d %H:%M:%S.%f')
-    df = pd.DataFrame({'timestamp':timestamp, 'x':x}) 
-    df.set_index('timestamp', inplace=True)
-    samp1, samp2, lbl = get_pairs(df, args.span, args.steps, args.tpos, args.tneg)
-    samples += samp1.shape[0]
-  print('No. of samples = {:d}'.format(samples))
+  if not os.path.exists(args.outdir):
+    os.makedirs(args.outdir)
 
   # Get sample pairs
-  samples = 1073741
-  argstr = 'x'.join(arg for arg in [str(samples), str(args.steps), str(args.channels)])
-  samples1 = np.memmap(os.path.join(args.outdir,'samples1_'+argstr+'.npy'), mode='w+',\
-                       dtype=np.float32, shape=(samples, args.steps, args.channels))
-  samples2 = np.memmap(os.path.join(args.outdir,'samples2_'+argstr+'.npy'), mode='w+',\
-                       dtype=np.float32, shape=(samples, args.steps, args.channels))
-  labels = np.memmap(os.path.join(args.outdir,'labels_'+argstr+'.npy'), mode='w+',\
-                       dtype=np.int32, shape=(samples,))
-  
-  nsamp = 0
   files = os.listdir(args.indir)
-  for fname in files:
+  for idx,fname in enumerate(files):
     print('Processing ' + fname)
 
     fh = h5py.File(os.path.join(args.indir,fname), 'r')
@@ -154,27 +132,22 @@ def main(args):
                          'ENMO':ENMO, 'angz':angz, 'LIDS':LIDS}) 
     df.set_index('timestamp', inplace=True)
     samp1, samp2, lbl = get_pairs(df, args.span, args.steps, args.tpos, args.tneg)
-    sz = samp1.shape[0]
-    samples1[nsamp:nsamp+sz,:,:] = samp1[:,:,:]
-    samples2[nsamp:nsamp+sz,:,:] = samp2[:,:,:]
-    labels[nsamp:nsamp+sz] = lbl[:]
-    nsamp += sz
-
-  # Compute data statistics and normalize
-  print('Computing statistics ...')
-  mean = (samples1.mean(axis=0) + samples2.mean(axis=0)) / 2.0
-  std = (samples1.std(axis=0) + samples2.std(axis=0)) / 2.0
-  np.savez(os.path.join(args.outdir, 'stats_'+argstr+'.npz'), mean=mean, std=std)
-  print('Normalizing ...')
-  samples1 -= mean
-  samples1 /= std
-  samples2 -= mean
-  samples2 /= std
-
-  # Flush out memmap arrays
-  del samples1
-  del samples2
-  del labels
+    if idx == 0:
+      with h5py.File(os.path.join(args.outdir, 'dataset.h5'), 'w') as fp:
+        fp.create_dataset('samp1', data=samp1, compression='gzip', chunks=True,\
+                          maxshape=(None,samp1.shape[1],samp1.shape[2]))
+        fp.create_dataset('samp2', data=samp2, compression='gzip', chunks=True,\
+                          maxshape=(None,samp2.shape[1],samp2.shape[2]))
+        fp.create_dataset('label', data=lbl, compression='gzip', chunks=True,\
+                          maxshape=(None,))
+    else:
+      with h5py.File(os.path.join(args.outdir, 'dataset.h5'), 'a') as fp:
+        fp['samp1'].resize((fp['samp1'].shape[0] + samp1.shape[0]), axis=0)
+        fp['samp1'][-samp1.shape[0]:] = samp1
+        fp['samp2'].resize((fp['samp2'].shape[0] + samp2.shape[0]), axis=0)
+        fp['samp2'][-samp2.shape[0]:] = samp2
+        fp['label'].resize((fp['label'].shape[0] + lbl.shape[0]), axis=0)
+        fp['label'][-lbl.shape[0]:] = lbl
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
