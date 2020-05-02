@@ -99,11 +99,6 @@ def main(argv):
   test_gen = DataGenerator(test_samples1, test_samples2, test_labels,\
                            batch_size=batch_size, seqlen=seqlen, channels=channels)
 
-  for i in range(len(train_gen)):
-    (x1,x2),y = train_gen[i]
-    print(x1.shape, x2.shape, y.shape)
-  exit()
-
   # Create model
   resnet_model = Resnet(input_shape=(seqlen, channels), norm_max=args.maxnorm)
   samp1 = Input(shape=(seqlen, channels))
