@@ -2,6 +2,7 @@ import sys,os
 import numpy as np
 import random
 import argparse
+import h5py
 from collections import Counter
 from sklearn.metrics import accuracy_score
 
@@ -52,9 +53,7 @@ def get_best_model(indir, mode='max'):
   return files[best_idx], epoch[best_idx], metric[best_idx]
 
 def main(argv):
-  traindir = args.traindir
-  valdir = args.valdir
-  testdir = args.testdir
+  indir = args.indir
   outdir = args.outdir
 
   if not os.path.exists(outdir):
@@ -71,40 +70,25 @@ def main(argv):
   batch_size = args.batchsize
 
   # Read train data
-  train_files = os.listdir(traindir)
-  shape_str = train_files[0].split('.npy')[0].split('_')[2]
-  [num_train, seqlen, channels] = [int(elem) for elem in shape_str.split('x')]
-
-  train_samples1 = np.memmap(os.path.join(traindir, 'train_samples1_'+shape_str+'.npy'), dtype='float32',\
-                             mode='r', shape=(num_train, seqlen, channels))
-  train_samples2 = np.memmap(os.path.join(traindir, 'train_samples2_'+shape_str+'.npy'), dtype='float32',\
-                             mode='r', shape=(num_train, seqlen, channels))
-  train_labels = np.memmap(os.path.join(traindir, 'train_labels_'+shape_str+'.npy'), dtype='int32',\
-                           mode='r', shape=(num_train,))
+  ftrain = h5py.File(os.path.join(args.indir, 'train_dataset.h5'), 'r')
+  train_samples1 = ftrain['samp1']
+  train_samples2 = ftrain['samp2']
+  train_labels = np.array(ftrain['label'], dtype=np.int32)
+  [num_train, seqlen, channels] = train_samples1.shape
 
   # Read validation data
-  val_files = os.listdir(valdir)
-  shape_str = val_files[0].split('.npy')[0].split('_')[2]
-  [num_val, seqlen, channels] = [int(elem) for elem in shape_str.split('x')]
-
-  val_samples1 = np.memmap(os.path.join(valdir, 'val_samples1_'+shape_str+'.npy'), dtype='float32',\
-                             mode='r', shape=(num_val, seqlen, channels))
-  val_samples2 = np.memmap(os.path.join(valdir, 'val_samples2_'+shape_str+'.npy'), dtype='float32',\
-                             mode='r', shape=(num_val, seqlen, channels))
-  val_labels = np.memmap(os.path.join(valdir, 'val_labels_'+shape_str+'.npy'), dtype='int32',\
-                           mode='r', shape=(num_val,))
+  fval = h5py.File(os.path.join(args.indir, 'val_dataset.h5'), 'r')
+  val_samples1 = fval['samp1']
+  val_samples2 = fval['samp2']
+  val_labels = np.array(fval['label'], dtype=np.int32)
+  [num_val, seqlen, channels] = val_samples1.shape
 
   # Read test data
-  test_files = os.listdir(testdir)
-  shape_str = test_files[0].split('.npy')[0].split('_')[2]
-  [num_test, seqlen, channels] = [int(elem) for elem in shape_str.split('x')]
-
-  test_samples1 = np.memmap(os.path.join(testdir, 'test_samples1_'+shape_str+'.npy'), dtype='float32',\
-                             mode='r', shape=(num_test, seqlen, channels))
-  test_samples2 = np.memmap(os.path.join(testdir, 'test_samples2_'+shape_str+'.npy'), dtype='float32',\
-                             mode='r', shape=(num_test, seqlen, channels))
-  test_labels = np.memmap(os.path.join(testdir, 'test_labels_'+shape_str+'.npy'), dtype='int32',\
-                           mode='r', shape=(num_test,))
+  ftest = h5py.File(os.path.join(args.indir, 'test_dataset.h5'), 'r')
+  test_samples1 = ftest['samp1']
+  test_samples2 = ftest['samp2']
+  test_labels = np.array(ftest['label'], dtype=np.int32)
+  [num_test, seqlen, channels] = test_samples1.shape
 
   # Data generators for train/val/test
   train_gen = DataGenerator(train_samples1, train_samples2, train_labels,\
@@ -114,6 +98,11 @@ def main(argv):
                           batch_size=batch_size, seqlen=seqlen, channels=channels)
   test_gen = DataGenerator(test_samples1, test_samples2, test_labels,\
                            batch_size=batch_size, seqlen=seqlen, channels=channels)
+
+  for i in range(len(train_gen)):
+    (x1,x2),y = train_gen[i]
+    print(x1.shape, x2.shape, y.shape)
+  exit()
 
   # Create model
   resnet_model = Resnet(input_shape=(seqlen, channels), norm_max=args.maxnorm)
@@ -168,9 +157,7 @@ def main(argv):
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--traindir', type=str, help='directory with train data')
-  parser.add_argument('--valdir', type=str, help='directory with val data')
-  parser.add_argument('--testdir', type=str, help='directory with test data')
+  parser.add_argument('--indir', type=str, help='directory with train/val/test data')
   parser.add_argument('--outdir', type=str, help='output directory to store results and models')
   parser.add_argument('--lr', type=float, default=0.001, help='learning rate')        
   parser.add_argument('--batchsize', type=int, default=64, help='batch size')        
