@@ -62,7 +62,7 @@ class DataGenerator(Sequence):
       indices = np.array(indices[:orig_sz])
     
     # Generate data
-    X1, X2, y = self.__data_generation__(indices)
+    X1, X2, y = self.__data_generation__(np.sort(indices))
     
     return (X1, X2), y
 
