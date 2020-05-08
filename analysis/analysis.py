@@ -3,7 +3,7 @@ import pandas as pd
 from collections import Counter
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score,\
                             classification_report, confusion_matrix,\
-                            roc_auc_score, average_precision_score
+                            roc_auc_score, average_precision_score, precision_recall_curve
 from sklearn_hierarchical_classification.metrics import h_fbeta_score, multi_labeled, fill_ancestors
 from sklearn_hierarchical_classification.constants import ROOT
 from networkx import DiGraph

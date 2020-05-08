@@ -1,7 +1,7 @@
 import sys, os
 import numpy as np
 import pandas as pd
-import pickle
+import joblib
 
 from features import compute_features
 from collections import Counter
@@ -14,8 +14,7 @@ def get_sleep_stage(data, time_interval, modeldir, mode):
 
   df = pd.DataFrame(data, columns=['timestamp','x','y','z'])
   df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-  print(df['timestamp'][0], df['timestamp'][len(df)-1])
-  
+
   # Compute features
   feat = compute_features(df, time_interval)
   N = feat.shape[0]
@@ -24,11 +23,11 @@ def get_sleep_stage(data, time_interval, modeldir, mode):
   model_files = os.listdir(modeldir)
   nonwear_files = [fname for fname in model_files if 'nonwear' in fname]
   nfolds = len(nonwear_files)
-  
+
   nw_pred = None
   for fold,fname in enumerate(nonwear_files):
     print('Predicting nonwear with model ' + str(fold+1))
-    scaler, cv_clf = pickle.load(open(os.path.join(modeldir, fname), 'rb'))
+    scaler, cv_clf = joblib.load(os.path.join(modeldir, fname))
     feat_sc = scaler.transform(feat)
     fold_nw_pred = cv_clf.predict_proba(feat_sc)
     if fold == 0:
@@ -45,7 +44,7 @@ def get_sleep_stage(data, time_interval, modeldir, mode):
   y_pred = None
   for fold,fname in enumerate(model_files):
     print('Predicting sleep states with model ' + str(fold+1))
-    scaler, cv_clf = pickle.load(open(os.path.join(modeldir, fname), 'rb'))
+    scaler, cv_clf = joblib.load(os.path.join(modeldir, fname))
     feat_sc = scaler.transform(feat)
     fold_y_pred = cv_clf.predict_proba(feat_sc)
     if fold == 0:
@@ -60,11 +59,8 @@ def get_sleep_stage(data, time_interval, modeldir, mode):
   results = np.array(['Nonwear']*N)
   results[nw_pred == 0] = y_pred[nw_pred == 0]
   results = list(results)
-  print(Counter(results))
 
-  sys.stdout.flush()
+  #sys.stdout.flush()
   
-  # Return results
-  #summ = (df['x'] + df['y'] + df['z']).values
   return results
 

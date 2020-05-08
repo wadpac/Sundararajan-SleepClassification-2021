@@ -1,7 +1,7 @@
 from tensorflow import keras
 from tensorflow.keras import Input, Sequential, Model
-from tensorflow.keras.layers import Dense, Activation, Conv1D, Lambda, Conv2DTranspose, LeakyReLU, Flatten,\
-                                    Add, BatchNormalization, MaxPooling1D, GlobalAveragePooling1D, ZeroPadding1D, Dropout
+from tensorflow.keras.layers import Dense, Activation, Conv1D, LeakyReLU, Flatten,\
+                                    Add, BatchNormalization, MaxPooling1D
 from tensorflow.keras.initializers import glorot_uniform
 from tensorflow.keras.regularizers import l2
 import tensorflow.keras.backend as K
@@ -126,57 +126,26 @@ def conv_block(inputs, filters, ksz, stage, block, s=2, norm_max=1.0):
                          beta_constraint=MaxNorm(norm_max,axis=0))(x)
   return x
 
-def Conv1DTranspose(inputs, filters, ksz, s=2, padding='same', norm_max=1.0):
-  """
-  1D Transposed convolution for FCN
-
-  Parameters
-  __________
-  inputs : input tensor of shape (batch_size, num_steps_prev, num_ch_prev)
-  filters : integer defining num of conv filters
-  ksz : filter width of convolutional layer
-  s : integer specifying stride
-  padding : padding for the convolutional layer
-  norm_max    : maximum norm for constraint
-
-  Returns
-  _______
-  x : output tensor of shape (batch_size, num_steps, num_ch)
-  """
-  x = Lambda(lambda x: K.expand_dims(x, axis=2))(inputs)
-  x = Conv2DTranspose(filters=filters, kernel_size=(ksz, 1), strides=(s, 1), padding=padding,
-                      name='conv_transpose', use_bias=False,
-                      kernel_constraint=MaxNorm(norm_max,axis=[0,1,2,3]),
-                      kernel_initializer=glorot_uniform(seed=0))(x)
-  x = Lambda(lambda x: K.squeeze(x, axis=2))(x)
-  return x
-
-def FCN(input_shape, max_seqlen, num_classes=2, norm_max=1.0):
+def Resnet(input_shape, norm_max=1.0):
   """
   Generate a fully convolutional neural network (FCN) model.
 
   Parameters
   ----------
   input_shape : tuple defining shape of the input dataset: (num_timesteps, num_channels)
-  num_classes : integer defining number of classes for classification task
   norm_max    : maximum norm for constraint
 
   Returns
   -------
   model : Keras model
   """
-  outputdim = num_classes  # number of classes
-
   inputs = Input(shape = input_shape)
 
-  # Zero padding
-  pad_wd = (max_seqlen - input_shape[0])//2
-  x = ZeroPadding1D((pad_wd,pad_wd))(inputs)
-
   # Stage 1
-  x = Conv1D(filters=32, kernel_size=7, strides=2, padding='valid', use_bias=False,
+  x = Conv1D(filters=32, kernel_size=7, strides=2,
+             padding='valid', use_bias=False,
              kernel_constraint=MaxNorm(norm_max, axis=[0,1,2]),
-             name = 'conv1', kernel_initializer=glorot_uniform(seed=0))(x)
+             name = 'conv1', kernel_initializer=glorot_uniform(seed=0))(inputs)
   x = LeakyReLU(alpha=0.1)(x)
   x = BatchNormalization(axis=-1, momentum=0.9, name='bn_conv1',
                          gamma_constraint=MaxNorm(norm_max,axis=0),
@@ -188,11 +157,11 @@ def FCN(input_shape, max_seqlen, num_classes=2, norm_max=1.0):
   x = identity_block(x, ksz=3, filters=[16,16,32], stage=2, block='c', norm_max=norm_max)
 
 #  # Stage 3
-#  x = conv_block(x, ksz=3, filters=[64,64,128], stage=3, block='a', s=2)
-#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='b')
-#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='c')
-#  x = identity_block(x, ksz=3, filters=[64,64,128], stage=3, block='d')
-
+#  x = conv_block(x, ksz=3, filters=[32,32,64], stage=3, block='a', s=2, norm_max=norm_max)
+#  x = identity_block(x, ksz=3, filters=[32,32,64], stage=3, block='b', norm_max=norm_max)
+#  x = identity_block(x, ksz=3, filters=[32,32,64], stage=3, block='c', norm_max=norm_max)
+#  x = identity_block(x, ksz=3, filters=[32,32,64], stage=3, block='d', norm_max=norm_max)
+#
 #  # Stage 4
 #  x = conv_block(x, ksz=3, filters=[128,128,256], stage=4, block='a', s=2)
 #  x = identity_block(x, ksz=3, filters=[128,128,256], stage=4, block='b')
@@ -209,19 +178,8 @@ def FCN(input_shape, max_seqlen, num_classes=2, norm_max=1.0):
 #  x = identity_block(x, ksz=3, filters=[256,256,512], stage=5, block='f')
 
   # Output stage
-  #x = Conv1DTranspose(x, filters=64, ksz=5, s=4, norm_max=norm_max)
-  #x = GlobalAveragePooling1D()(x)
   x = MaxPooling1D(pool_size=2)(x)
-  x = Flatten()(x)
-  x = Dense(units=100, activation='relu', name='Dense1',
-                  kernel_constraint=MaxNorm(norm_max,axis=[0,1]),
-                  bias_constraint=MaxNorm(norm_max,axis=0),
-                  kernel_initializer=glorot_uniform(seed=0))(x)
-  x = Dropout(rate=0.2)(x)
-  outputs = Dense(num_classes, activation='softmax', name='Dense_out',
-                  kernel_constraint=MaxNorm(norm_max,axis=[0,1]),
-                  bias_constraint=MaxNorm(norm_max,axis=0),
-                  kernel_initializer=glorot_uniform(seed=0))(x)
+  outputs = Flatten(name='last_layer')(x)
 
   model = Model(inputs=inputs, outputs=outputs)
   return model
