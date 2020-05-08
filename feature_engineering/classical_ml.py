@@ -108,10 +108,19 @@ def main(argv):
     train_users = list(set(out_fold_users_train))
     out_fold_X_train_resamp, out_fold_y_train_resamp, out_fold_users_train_resamp = None, None, None
     for i,user in enumerate(train_users):
-      print('%d/%d - %s' % (i+1,len(train_users),user))
+      #print('%d/%d - %s' % (i+1,len(train_users),user))
       user_X = out_fold_X_train_sc[out_fold_users_train == user]
       user_y = out_fold_y_train[out_fold_users_train == user]
-      user_X_resamp, user_y_resamp = smote.fit_resample(user_X, user_y)
+      if len(set(user_y)) == 1:
+        print('%d/%d: %s has only one class' % (i+1,len(train_users),user))
+        print(Counter(user_y))
+        continue
+      try:
+        user_X_resamp, user_y_resamp = smote.fit_resample(user_X, user_y)
+      except:
+        print('%d/%d: %s failed to fit' % (i+1,len(train_users),user))
+        print(Counter(user_y))
+        continue
       user_y_resamp = user_y_resamp.reshape(-1,1)
       user_resamp = np.array([user] * len(user_X_resamp)).reshape(-1,1)
       if i == 0:
