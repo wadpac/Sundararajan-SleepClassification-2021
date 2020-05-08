@@ -123,7 +123,7 @@ def main(argv):
         continue
       user_y_resamp = user_y_resamp.reshape(-1,1)
       user_resamp = np.array([user] * len(user_X_resamp)).reshape(-1,1)
-      if i == 0:
+      if out_fold_X_train_resamp is None:
         out_fold_X_train_resamp = user_X_resamp
         out_fold_y_train_resamp = user_y_resamp
         out_fold_users_train_resamp = user_resamp
