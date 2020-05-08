@@ -113,8 +113,8 @@ def main(argv):
       custom_cv_indices.append((grp_train_idx, grp_test_idx))
         
     print('Training')        
-    search_params = {'clf__base_estimator__n_estimators':[50,100,200,300,500], \
-         'clf__base_estimator__max_depth': [5,10,None]}
+    search_params = {'clf__base_estimator__n_estimators':[50,100,200,300,500,700], \
+         'clf__base_estimator__max_depth': [5,10,15,None]}
     cv_clf = RandomizedSearchCV(estimator=pipe, param_distributions=search_params, \
                        cv=custom_cv_indices, scoring=make_scorer(custom_h_fbeta,graph=graph), n_iter=5, \
                        n_jobs=-1, verbose=1)
