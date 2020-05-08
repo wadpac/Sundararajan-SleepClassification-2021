@@ -79,13 +79,13 @@ def main(argv):
   imbalanced_pred = []; imbalanced_imp = []
   balanced_pred = []; balanced_imp = []
   outer_cv_splits = 5; inner_cv_splits = 5
-  group_kfold = GroupKFold(n_splits=outer_cv_splits)
+  outer_group_kfold = GroupKFold(n_splits=outer_cv_splits)
   out_fold = 0
-  for train_indices, test_indices in group_kfold.split(X,y,groups):
+  for train_indices, test_indices in outer_group_kfold.split(X,y,groups):
     out_fold += 1
     out_fold_X_train = X[train_indices,:]; out_fold_X_test = X[test_indices,:]
     out_fold_y_train = y[train_indices]; out_fold_y_test = y[test_indices]
-    out_fold_users_test = groups[test_indices]
+    out_fold_users_train = groups[train_indices]; out_fold_users_test = groups[test_indices]
     out_fold_ts_test = ts[test_indices]
     out_fold_fnames_test = fnames[test_indices]
 
@@ -93,55 +93,46 @@ def main(argv):
     class_wt = {i:val for i,val in enumerate(class_wt)}
 
     # Inner CV
-    strat_kfold = StratifiedKFold(n_splits=inner_cv_splits, random_state=0,
-                                  shuffle=True)       
-#    #################### Without balancing #######################
-#
-#    custom_cv_indices = []
-#    for grp_train_idx, grp_test_idx in \
-#            strat_kfold.split(out_fold_X_train,out_fold_y_train):
-#      custom_cv_indices.append((grp_train_idx, grp_test_idx))
-#
-#    pipe = Pipeline([('scl', StandardScaler()),
-#                 ('clf', RandomForestClassifier(class_weight='balanced',
-#                 random_state=0))])
-#
-#    print('Fold'+str(out_fold)+' - Imbalanced: Hyperparameter search')
-#    search_params = {'clf__n_estimators':[50,100,200,300,500],
-#                 'clf__max_depth': [5,10,None]}
-#    cv_clf = RandomizedSearchCV(estimator=pipe, param_distributions=search_params,
-#                            cv=custom_cv_indices, scoring='f1_macro', n_iter=5,
-#                            n_jobs=-1, verbose=2)
-#    cv_clf.fit(out_fold_X_train, out_fold_y_train)
-#    joblib.dump(cv_clf, os.path.join(resultdir,\
-#                'fold'+str(out_fold)+'_'+ mode + '_imbalanced_RF.sav')
-#    out_fold_y_test_pred = cv_clf.predict_proba(out_fold_X_test)
-#    print('Fold'+str(out_fold)+' - Imbalanced', cv_clf.best_params_)
-#
-#    imbalanced_pred.append((out_fold_users_test, out_fold_ts_test, out_fold_fnames_test,
-#                            out_fold_y_test, out_fold_y_test_pred))
-#    imbalanced_imp.append(cv_clf.best_estimator_.named_steps['clf'].feature_importances_)
-
     ################## Balancing with SMOTE ###################
-
     scaler = StandardScaler()
     scaler.fit(out_fold_X_train)
     out_fold_X_train_sc = scaler.transform(out_fold_X_train)
     out_fold_X_test_sc = scaler.transform(out_fold_X_test)
     
-
-    # Resample training data
-    print('Fold'+str(out_fold)+' - Balanced: SMOTE')
     # Imblearn - Undersampling techniques ENN and Tomek are too slow and 
     # difficult to parallelize
     # So stick only with oversampling techniques
+    print('Fold'+str(out_fold)+' - Balanced: SMOTE')
     smote = SMOTE(random_state=0, n_jobs=-1, sampling_strategy='all')
-    out_fold_X_train_resamp, out_fold_y_train_resamp = \
-                    smote.fit_resample(out_fold_X_train_sc, out_fold_y_train)
+    # Resample training data for each user
+    train_users = list(set(out_fold_users_train))
+    out_fold_X_train_resamp, out_fold_y_train_resamp, out_fold_users_train_resamp = None, None, None
+    for i,user in enumerate(train_users):
+      print('%d/%d - %s' % (i+1,len(train_users),user))
+      user_X = out_fold_X_train_sc[out_fold_users_train == user]
+      user_y = out_fold_y_train[out_fold_users_train == user]
+      user_X_resamp, user_y_resamp = smote.fit_resample(user_X, user_y)
+      user_y_resamp = user_y_resamp.reshape(-1,1)
+      user_resamp = np.array([user] * len(user_X_resamp)).reshape(-1,1)
+      if i == 0:
+        out_fold_X_train_resamp = user_X_resamp
+        out_fold_y_train_resamp = user_y_resamp
+        out_fold_users_train_resamp = user_resamp
+      else:
+        out_fold_X_train_resamp = np.vstack((out_fold_X_train_resamp, user_X_resamp))
+        out_fold_y_train_resamp = np.vstack((out_fold_y_train_resamp, user_y_resamp))
+        out_fold_users_train_resamp = np.vstack((out_fold_users_train_resamp, user_resamp))
+    # Shuffle resampled data
+    resamp_indices = np.arange(len(out_fold_X_train_resamp))
+    np.random.shuffle(resamp_indices)
+    out_fold_X_train_resamp = out_fold_X_train_resamp[resamp_indices]
+    out_fold_y_train_resamp = out_fold_y_train_resamp[resamp_indices].reshape(-1)
+    out_fold_users_train_resamp = out_fold_users_train_resamp[resamp_indices].reshape(-1)
 
+    inner_group_kfold = GroupKFold(n_splits=inner_cv_splits)
     custom_resamp_cv_indices = []
     for grp_train_idx, grp_test_idx in \
-          strat_kfold.split(out_fold_X_train_resamp,out_fold_y_train_resamp):
+          inner_group_kfold.split(out_fold_X_train_resamp, out_fold_y_train_resamp, out_fold_users_train_resamp):
       custom_resamp_cv_indices.append((grp_train_idx, grp_test_idx))
 
     # Note: imblearn Pipeline is slow and sklearn pipeline yields poor results 
