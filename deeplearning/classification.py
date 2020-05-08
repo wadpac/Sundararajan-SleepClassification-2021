@@ -17,7 +17,7 @@ from sklearn.utils import class_weight
 
 import matplotlib.pyplot as plt
 
-from FCN import FCN
+from resnet import Resnet
 from datagenerator import DataGenerator
 from transforms import get_LIDS
 from metrics import macro_f1
@@ -102,7 +102,7 @@ def main(argv):
     os.makedirs(resultdir)
 
   # Read data from disk
-  data = pd.read_csv(os.path.join(indir,'features_30.0s.csv'))
+  data = pd.read_csv(os.path.join(indir,'all_train_features_30.0s.csv'))
   labels = data['label'].values
   users = data['user'].values
   if mode == 'binary':
@@ -111,11 +111,15 @@ def main(argv):
     labels = np.array(['Wear' if lbl in collate_states else lbl for lbl in labels])
 
   # Read raw data
-  shape_df = pd.read_csv(os.path.join(indir,'datashape_30.0s.csv'))
-  num_samples = shape_df['num_samples'].values[0]
-  seqlen = shape_df['num_timesteps'].values[0]
-  n_channels = shape_df['num_channels'].values[0]
-  raw_data = np.memmap(os.path.join(indir,'rawdata_30.0s.npz'), dtype='float32', mode='r', shape=(num_samples, seqlen, n_channels))
+  #shape_df = pd.read_csv(os.path.join(indir,'datashape_30.0s.csv'))
+  #num_samples = shape_df['num_samples'].values[0]
+  #seqlen = shape_df['num_timesteps'].values[0]
+  #n_channels = shape_df['num_channels'].values[0]
+  #raw_data = np.memmap(os.path.join(indir,'rawdata_30.0s.npz'), dtype='float32', mode='r', shape=(num_samples, seqlen, n_channels))
+
+  fp = h5py.File(os.path.join(indir, 'all_train_rawdata_30.0s.h5'), 'r')
+  raw_data = fp['data']
+  [num_samples, seqlen, n_channels] = raw_data.shape
 
   # Hyperparameters
   lr = args.lr # learning rate
@@ -211,57 +215,57 @@ def main(argv):
                              batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
                              n_classes=num_classes, mean=mean, std=std)
 
-    # Create model
-    # Use batchnorm as first step since computing mean and std 
-    # across entire dataset is time-consuming
-    model = FCN(input_shape=(seqlen,num_channels+feat_channels), max_seqlen=max_seqlen,
-                num_classes=len(valid_states), norm_max=args.maxnorm)
-    #print(model.summary()); exit()
-    model.compile(optimizer=Adam(lr=lr),
-                  loss=focal_loss(),
-                  metrics=['accuracy', macro_f1])
-
-    # Train model
-    # Use callback to compute F-scores over entire validation data
-    metrics_cb = Metrics(val_data=val_gen, batch_size=batch_size)
-    # Use early stopping and model checkpoints to handle overfitting and save best model
-    model_checkpt = ModelCheckpoint(os.path.join(resultdir,'fold'+str(fold+1)+'_'+mode+'-{epoch:02d}-{val_f1:.4f}.h5'),\
-                                                 monitor='val_f1',\
-                                                 mode='max', save_best_only=True)
-    batch_renorm_cb = BatchRenormScheduler(len(train_gen))
-    history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
-                        verbose=1, shuffle=False,
-                        callbacks=[batch_renorm_cb, metrics_cb, model_checkpt],
-                        workers=2, max_queue_size=20, use_multiprocessing=False)
-
-    # Plot training history
-    plot_results(fold+1, history.history['loss'], history.history['val_loss'],\
-                 os.path.join(resultdir,'Fold'+str(fold+1)+'_'+mode+'_loss.jpg'), metric='Loss')
-    plot_results(fold+1, history.history['accuracy'], history.history['val_accuracy'],\
-                 os.path.join(resultdir,'Fold'+str(fold+1)+'_'+mode+'_accuracy.jpg'), metric='Accuracy')
-    plot_results(fold+1, history.history['macro_f1'], metrics_cb.val_f1,\
-                 os.path.join(resultdir,'Fold'+str(fold+1)+'_'+mode+'_macro_f1.jpg'), metric='Macro F1')
-    
-    # Predict probability on validation data using best model
-    best_model_file, epoch, val_f1 = get_best_model(resultdir, fold+1)
-    print('Predicting with model saved at Epoch={:d} with val_f1={:0.4f}'.format(epoch, val_f1))
-    model.load_weights(os.path.join(resultdir,best_model_file))
-    probs = model.predict(test_gen)
-    y_pred = probs.argmax(axis=1)
-    y_true = fold_labels[test_indices]
-    predictions.append((users[test_indices], data.iloc[test_indices]['timestamp'], 
-                        data.iloc[test_indices]['filename'], test_indices, y_true, probs))
-
-    # Save user report
-    cv_save_classification_result(predictions, valid_states, 
-                                  os.path.join(resultdir,'fold'+str(fold+1)+'_deeplearning_' + mode + '_results.csv'), method='dl')
-    cv_get_classification_report(predictions, mode, valid_states, method='dl')
-  
-  cv_get_classification_report(predictions, mode, valid_states, method='dl')
-
-  # Save user report
-  cv_save_classification_result(predictions, valid_states,
-                                os.path.join(resultdir,'deeplearning_' + mode + '_results.csv'), method='dl')
+#    # Create model
+#    # Use batchnorm as first step since computing mean and std 
+#    # across entire dataset is time-consuming
+#    model = FCN(input_shape=(seqlen,num_channels+feat_channels), max_seqlen=max_seqlen,
+#                num_classes=len(valid_states), norm_max=args.maxnorm)
+#    #print(model.summary()); exit()
+#    model.compile(optimizer=Adam(lr=lr),
+#                  loss=focal_loss(),
+#                  metrics=['accuracy', macro_f1])
+#
+#    # Train model
+#    # Use callback to compute F-scores over entire validation data
+#    metrics_cb = Metrics(val_data=val_gen, batch_size=batch_size)
+#    # Use early stopping and model checkpoints to handle overfitting and save best model
+#    model_checkpt = ModelCheckpoint(os.path.join(resultdir,'fold'+str(fold+1)+'_'+mode+'-{epoch:02d}-{val_f1:.4f}.h5'),\
+#                                                 monitor='val_f1',\
+#                                                 mode='max', save_best_only=True)
+#    batch_renorm_cb = BatchRenormScheduler(len(train_gen))
+#    history = model.fit(train_gen, epochs=num_epochs, validation_data=val_gen, 
+#                        verbose=1, shuffle=False,
+#                        callbacks=[batch_renorm_cb, metrics_cb, model_checkpt],
+#                        workers=2, max_queue_size=20, use_multiprocessing=False)
+#
+#    # Plot training history
+#    plot_results(fold+1, history.history['loss'], history.history['val_loss'],\
+#                 os.path.join(resultdir,'Fold'+str(fold+1)+'_'+mode+'_loss.jpg'), metric='Loss')
+#    plot_results(fold+1, history.history['accuracy'], history.history['val_accuracy'],\
+#                 os.path.join(resultdir,'Fold'+str(fold+1)+'_'+mode+'_accuracy.jpg'), metric='Accuracy')
+#    plot_results(fold+1, history.history['macro_f1'], metrics_cb.val_f1,\
+#                 os.path.join(resultdir,'Fold'+str(fold+1)+'_'+mode+'_macro_f1.jpg'), metric='Macro F1')
+#    
+#    # Predict probability on validation data using best model
+#    best_model_file, epoch, val_f1 = get_best_model(resultdir, fold+1)
+#    print('Predicting with model saved at Epoch={:d} with val_f1={:0.4f}'.format(epoch, val_f1))
+#    model.load_weights(os.path.join(resultdir,best_model_file))
+#    probs = model.predict(test_gen)
+#    y_pred = probs.argmax(axis=1)
+#    y_true = fold_labels[test_indices]
+#    predictions.append((users[test_indices], data.iloc[test_indices]['timestamp'], 
+#                        data.iloc[test_indices]['filename'], test_indices, y_true, probs))
+#
+#    # Save user report
+#    cv_save_classification_result(predictions, valid_states, 
+#                                  os.path.join(resultdir,'fold'+str(fold+1)+'_deeplearning_' + mode + '_results.csv'), method='dl')
+#    cv_get_classification_report(predictions, mode, valid_states, method='dl')
+#  
+#  cv_get_classification_report(predictions, mode, valid_states, method='dl')
+#
+#  # Save user report
+#  cv_save_classification_result(predictions, valid_states,
+#                                os.path.join(resultdir,'deeplearning_' + mode + '_results.csv'), method='dl')
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
