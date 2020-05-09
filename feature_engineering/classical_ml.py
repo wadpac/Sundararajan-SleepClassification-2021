@@ -143,18 +143,21 @@ def main(argv):
     for grp_train_idx, grp_test_idx in \
           inner_group_kfold.split(out_fold_X_train_resamp, out_fold_y_train_resamp, out_fold_users_train_resamp):
       custom_resamp_cv_indices.append((grp_train_idx, grp_test_idx))
+      grp_train_users = out_fold_users_train_resamp[grp_train_idx]
+      grp_test_users = out_fold_users_train_resamp[grp_test_idx]
 
     # Note: imblearn Pipeline is slow and sklearn pipeline yields poor results 
     clf = RandomForestClassifier(class_weight=class_wt,
                              max_depth=None, random_state=0)
 
     print('Fold'+str(out_fold)+' - Balanced: Hyperparameter search')
-    search_params = {'n_estimators':[50,100,200,300,500,700],
-                 'max_depth': [5,10,15,None]}
+    search_params = {'n_estimators':[50,100,200,300,500],
+                 'max_depth': [5,10,15,20,None]}
     cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params,
                             cv=custom_resamp_cv_indices, scoring='f1_macro',
-                            n_iter=5, n_jobs=-1, verbose=2)
+                            n_iter=10, n_jobs=-1, verbose=2)
     cv_clf.fit(out_fold_X_train_resamp, out_fold_y_train_resamp)
+    print(cv_clf.best_estimator_)
     joblib.dump([scaler,cv_clf], os.path.join(resultdir,\
                 'fold'+str(out_fold)+'_'+ mode + '_balanced_RF.sav'))
     out_fold_y_test_pred = cv_clf.predict_proba(out_fold_X_test_sc)
@@ -164,13 +167,6 @@ def main(argv):
                           out_fold_y_test, out_fold_y_test_pred))
     balanced_imp.append(cv_clf.best_estimator_.feature_importances_)
 
-#  print('############## Imbalanced classification ##############')
-#  # Save imbalanced classification reports
-#  cv_save_feat_importances_result(imbalanced_imp, feat_cols,
-#                   os.path.join(outdir, mode + '_imbalanced_feat_imp.csv'))
-#  cv_save_classification_result(imbalanced_pred, states,
-#                   os.path.join(outdir, mode + '_imbalanced_classification.csv'))
- 
   print('############## Balanced classification ##############')
   # Save balanced classification reports
   cv_save_feat_importances_result(balanced_imp, feat_cols,
