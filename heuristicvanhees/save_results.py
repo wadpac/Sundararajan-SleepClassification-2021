@@ -6,7 +6,7 @@ from analysis import cv_save_feat_importances_result, cv_save_classification_res
 
 def main(argv):
   infile = argv[0]
-  outdir = argv[1]
+  outfile = argv[1]
 
   sleep_states = ['Wake', 'Sleep']
   df = pd.read_csv(infile)
@@ -23,7 +23,7 @@ def main(argv):
   y_pred_onehot[np.arange(len(y_pred)), y_pred] = 1
   predictions = [(df['user'], df['timestamp'], df['filename'], y_true, y_pred_onehot)]
 
-  cv_save_classification_result(predictions, sleep_states, os.path.join(outdir, 'heuristic_classification.csv'))
+  cv_save_classification_result(predictions, sleep_states, outfile)
 
 if __name__ == "__main__":
   main(sys.argv[1:])
