@@ -144,13 +144,16 @@ def cv_get_classification_report(pred_list, mode, sleep_states, method='feat_eng
 	        confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
     print('\n')
 
-def cv_classification_report(infile, mode='binary'):
+def cv_classification_report(infile, mode='binary', smooth=True):
   df = pd.read_csv(infile)
   
   sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
   sleep_labels = [idx for idx,state in enumerate(sleep_states)]
   true_cols = ['true_'+state for state in sleep_states]
-  pred_cols = ['smooth_'+state for state in sleep_states]
+  if smooth:
+    pred_cols = ['smooth_'+state for state in sleep_states]
+  else:
+    pred_cols = ['pred_'+state for state in sleep_states]
   nclasses = len(true_cols)
   nfolds = len(set(df['Fold']))
   
@@ -176,6 +179,7 @@ def cv_classification_report(infile, mode='binary'):
     metrics['precision'] += prec; metrics['recall'] += rec
     metrics['f1-score'] += fsc; metrics['accuracy'] += acc
     metrics['AP'] += ap
+    print('Fold %d: F-score = %0.2f' % (fold+1, fsc))
 
     # Get metrics per class except Nonwear
     fold_class_metrics = classification_report(y_true, y_pred, labels=sleep_labels,
@@ -213,7 +217,10 @@ def cv_classification_report(infile, mode='binary'):
   sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
   sleep_labels = [idx for idx,state in enumerate(sleep_states)]
   true_cols = [col for col in df.columns if col.startswith('true')]
-  pred_cols = [col for col in df.columns if col.startswith('smooth')]
+  if smooth:
+    pred_cols = [col for col in df.columns if col.startswith('smooth')]
+  else:
+    pred_cols = [col for col in df.columns if col.startswith('pred')]
   nclasses = len(true_cols)
   confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
   for fold in range(nfolds):
