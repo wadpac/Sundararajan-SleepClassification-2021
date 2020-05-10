@@ -5,7 +5,10 @@ def main(argv):
   infile = argv[0] 
   mode = argv[1] 
   if mode != 'hierarchical':
-    cv_classification_report(infile, mode)
+    if 'heuristic' in infile:
+      cv_classification_report(infile, mode, smooth=False)
+    else:
+      cv_classification_report(infile, mode)
   else:
     cv_hierarchical_classification_report(infile)
 
