@@ -1,5 +1,5 @@
 import sys,os
-import pickle
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -74,7 +74,7 @@ def main(argv):
   for fold,fname in enumerate(model_fnames):
     print('Processing fold ' + str(fold+1))
     if mode != 'hierarchical':
-      scaler, cv_clf = pickle.load(open(os.path.join(modeldir, fname), 'rb'))
+      scaler, cv_clf = joblib.load(open(os.path.join(modeldir, fname), 'rb'))
       x_test_sc = scaler.transform(x_test)
       fold_y_pred = cv_clf.predict_proba(x_test_sc)
     else:
