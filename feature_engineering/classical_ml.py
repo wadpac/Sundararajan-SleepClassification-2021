@@ -6,7 +6,7 @@ import numpy as np
 from collections import Counter
 import joblib
 
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
@@ -76,11 +76,13 @@ def main(argv):
 
   feat_len = X.shape[1]
 
-  # Outer CV
+  encoder = OneHotEncoder()
   scorer = make_scorer(average_precision_score, average='macro')
+
+  # Outer CV
   imbalanced_pred = []; imbalanced_imp = []
   balanced_pred = []; balanced_imp = []
-  outer_cv_splits = 5; inner_cv_splits = 5
+  outer_cv_splits = 5; inner_cv_splits = 3
   outer_group_kfold = GroupKFold(n_splits=outer_cv_splits)
   out_fold = 0
   for train_indices, test_indices in outer_group_kfold.split(X,y,groups):
@@ -91,8 +93,16 @@ def main(argv):
     out_fold_ts_test = ts[test_indices]
     out_fold_fnames_test = fnames[test_indices]
 
-    class_wt = compute_class_weight('balanced', np.unique(out_fold_y_train), out_fold_y_train)
-    class_wt = {i:val for i,val in enumerate(class_wt)}
+    if mode != 'multiclass':
+      class_wt = compute_class_weight('balanced', np.unique(out_fold_y_train), out_fold_y_train)
+      class_wt = {i:val for i,val in enumerate(class_wt)}
+    else:
+      class_wt = []
+      for cls in range(len(states)):
+        class_train = (out_fold_y_train == cls).astype(np.int32)
+        cls_wt = compute_class_weight('balanced', np.unique(class_train), class_train)
+        cls_wt = {i:val for i,val in enumerate(cls_wt)}
+        class_wt.append(cls_wt)
 
     # Inner CV
     ################## Balancing with SMOTE ###################
@@ -157,7 +167,9 @@ def main(argv):
                  'max_depth': [5,10,15,20,None]}
     cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params,
                             cv=custom_resamp_cv_indices, scoring=scorer,
-                            n_iter=10, n_jobs=-1, verbose=2)
+                            n_iter=3, n_jobs=-1, verbose=2)
+    if mode == 'multiclass':
+      out_fold_y_train_resamp = encoder.fit_transform(out_fold_y_train_resamp.reshape(-1,1)).todense()
     cv_clf.fit(out_fold_X_train_resamp, out_fold_y_train_resamp)
     print(cv_clf.best_estimator_)
     joblib.dump([scaler,cv_clf], os.path.join(resultdir,\
