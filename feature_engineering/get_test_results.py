@@ -68,6 +68,8 @@ def main(argv):
 
   N = x_test.shape[0]
 
+
+
   model_fnames = os.listdir(modeldir)
   model_fnames = [fname for fname in model_fnames if mode in fname]
   nfolds = len(model_fnames)
