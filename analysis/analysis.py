@@ -179,7 +179,7 @@ def cv_classification_report(infile, mode='binary', smooth=True):
     metrics['precision'] += prec; metrics['recall'] += rec
     metrics['f1-score'] += fsc; metrics['accuracy'] += acc
     metrics['AP'] += ap
-    print('Fold %d: F-score = %0.2f' % (fold+1, fsc))
+    print('Fold %d: F-score = %0.2f, AP=%0.2f' % (fold+1, fsc, ap))
 
     # Get metrics per class except Nonwear
     fold_class_metrics = classification_report(y_true, y_pred, labels=sleep_labels,
