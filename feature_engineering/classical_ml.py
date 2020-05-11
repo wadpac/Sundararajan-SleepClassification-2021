@@ -12,6 +12,7 @@ from sklearn.model_selection import GroupKFold, StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.utils.class_weight import compute_class_weight
+from sklearn.metrics import make_scorer, average_precision_score
 
 from imblearn.over_sampling import SMOTE
 
@@ -76,6 +77,7 @@ def main(argv):
   feat_len = X.shape[1]
 
   # Outer CV
+  scorer = make_scorer(average_precision_score, average='macro')
   imbalanced_pred = []; imbalanced_imp = []
   balanced_pred = []; balanced_imp = []
   outer_cv_splits = 5; inner_cv_splits = 5
@@ -154,7 +156,7 @@ def main(argv):
     search_params = {'n_estimators':[100,150,200,300,400,500],
                  'max_depth': [5,10,15,20,None]}
     cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params,
-                            cv=custom_resamp_cv_indices, scoring='average_precision',
+                            cv=custom_resamp_cv_indices, scoring=scorer,
                             n_iter=10, n_jobs=-1, verbose=2)
     cv_clf.fit(out_fold_X_train_resamp, out_fold_y_train_resamp)
     print(cv_clf.best_estimator_)
