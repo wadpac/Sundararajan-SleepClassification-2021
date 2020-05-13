@@ -82,7 +82,7 @@ def main(argv):
   # Outer CV
   imbalanced_pred = []; imbalanced_imp = []
   balanced_pred = []; balanced_imp = []
-  outer_cv_splits = 5; inner_cv_splits = 5
+  outer_cv_splits = 5; inner_cv_splits = 3
   outer_group_kfold = GroupKFold(n_splits=outer_cv_splits)
   out_fold = 0
   for train_indices, test_indices in outer_group_kfold.split(X,y,groups):
@@ -167,7 +167,7 @@ def main(argv):
                  'max_depth': [5,10,15,20,None]}
     cv_clf = RandomizedSearchCV(estimator=clf, param_distributions=search_params,
                             cv=custom_resamp_cv_indices, scoring=scorer,
-                            n_iter=10, n_jobs=-1, verbose=2)
+                            n_iter=3, n_jobs=-1, verbose=2)
     if mode == 'multiclass':
       out_fold_y_train_resamp = encoder.fit_transform(out_fold_y_train_resamp.reshape(-1,1)).todense()
     cv_clf.fit(out_fold_X_train_resamp, out_fold_y_train_resamp)
@@ -175,6 +175,16 @@ def main(argv):
     joblib.dump([scaler,cv_clf], os.path.join(resultdir,\
                 'fold'+str(out_fold)+'_'+ mode + '_balanced_RF.sav'))
     out_fold_y_test_pred = cv_clf.predict_proba(out_fold_X_test_sc)
+    if mode == 'multiclass': # collect probabilities from each binary classification
+      multiclass_y_pred = None
+      for cls in range(len(out_fold_y_test_pred)):
+        if cls == 0:
+          multiclass_y_pred = out_fold_y_test_pred[cls][:,1].reshape(-1,1)
+        else:
+          multiclass_y_pred = np.hstack((multiclass_y_pred, out_fold_y_test_pred[cls][:,1].reshape(-1,1)))
+      out_fold_y_test_pred = multiclass_y_pred
+      print(out_fold_y_test_pred.shape)
+      
     print('Fold'+str(out_fold)+' - Balanced', cv_clf.best_params_)
 
     balanced_pred.append((out_fold_users_test, out_fold_ts_test, out_fold_fnames_test,
