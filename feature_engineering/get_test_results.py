@@ -17,7 +17,8 @@ def main(argv):
   infile = argv[0]
   modeldir = argv[1]
   mode = argv[2]
-  outdir = argv[3]
+  ensemble = int(argv[3]) # 0 - use best model, 1 - use ensemble
+  outdir = argv[4]
 
   df = pd.read_csv(infile)
   method = 'feat_eng'
@@ -68,41 +69,47 @@ def main(argv):
 
   N = x_test.shape[0]
 
-
-
-  model_fnames = os.listdir(modeldir)
-  model_fnames = [fname for fname in model_fnames if mode in fname]
-  nfolds = len(model_fnames)
-  for fold,fname in enumerate(model_fnames):
-    print('Processing fold ' + str(fold+1))
-    if mode != 'hierarchical':
-      scaler, cv_clf = joblib.load(open(os.path.join(modeldir, fname), 'rb'))
-      x_test_sc = scaler.transform(x_test)
-      fold_y_pred = cv_clf.predict_proba(x_test_sc)
-    else:
-      cv_clf = pickle.load(open(os.path.join(modeldir, fname), 'rb'))
-      cv_clf = cv_clf.best_estimator_
-      fold_y_pred = cv_clf.predict(x_test)
-      fold_y_pred_prob = cv_clf.predict_proba(x_test)
-      with multi_labeled(y_test, fold_y_pred, cv_clf.named_steps['clf'].graph_) \
-                            as (y_test_, y_pred_, graph_, classes_):
-        states = classes_ 
-        y_test_ = fill_ancestors(y_test_, graph=graph_)
-        fold_y_pred_ = np.zeros(fold_y_pred_prob.shape)
-        for new_idx, label in enumerate(classes_):
-          old_idx = classes.index(label)
-          fold_y_pred_[:,new_idx] = fold_y_pred_prob[:,old_idx]
-      fold_y_pred = fold_y_pred_
-
-    # Accumulate prediction probabilities
-    if fold == 0:
-      y_pred = np.zeros((N,len(states)))
-    y_pred += fold_y_pred
+  if ensemble:
+    model_fnames = os.listdir(modeldir)
+    model_fnames = [fname for fname in model_fnames if mode in fname]
+    nfolds = len(model_fnames)
+    for fold,fname in enumerate(model_fnames):
+      print('Processing fold ' + str(fold+1))
+      if mode != 'hierarchical':
+        scaler, cv_clf = joblib.load(open(os.path.join(modeldir, fname), 'rb'))
+        x_test_sc = scaler.transform(x_test)
+        fold_y_pred = cv_clf.predict_proba(x_test_sc)
+      else:
+        cv_clf = pickle.load(open(os.path.join(modeldir, fname), 'rb'))
+        cv_clf = cv_clf.best_estimator_
+        fold_y_pred = cv_clf.predict(x_test)
+        fold_y_pred_prob = cv_clf.predict_proba(x_test)
+        with multi_labeled(y_test, fold_y_pred, cv_clf.named_steps['clf'].graph_) \
+                              as (y_test_, y_pred_, graph_, classes_):
+          states = classes_ 
+          y_test_ = fill_ancestors(y_test_, graph=graph_)
+          fold_y_pred_ = np.zeros(fold_y_pred_prob.shape)
+          for new_idx, label in enumerate(classes_):
+            old_idx = classes.index(label)
+            fold_y_pred_[:,new_idx] = fold_y_pred_prob[:,old_idx]
+        fold_y_pred = fold_y_pred_
   
-  # Get average predictions
-  y_pred = y_pred/float(nfolds)
-  if mode == 'hierarchical':
-    y_test = y_test_
+      # Accumulate prediction probabilities
+      if fold == 0:
+        y_pred = np.zeros((N,len(states)))
+      y_pred += fold_y_pred
+    
+    # Get average predictions
+    y_pred = y_pred/float(nfolds)
+    if mode == 'hierarchical':
+      y_test = y_test_
+  else:
+    if mode != 'hierarchical':  
+      model_fnames = os.listdir(modeldir)
+      model_fname = [fname for fname in model_fnames if mode in fname][0]  
+      scaler, clf = joblib.load(open(os.path.join(modeldir, model_fname), 'rb'))
+      x_test_sc = scaler.transform(x_test)
+      y_pred = clf.predict_proba(x_test_sc)
 
   # Save test results
   y_pred = [(users_test, ts_test, fnames_test, y_test, y_pred)]
