@@ -5,6 +5,7 @@ import random
 import argparse
 from collections import Counter
 from tqdm import tqdm
+import h5py
 
 import tensorflow as tf
 from tensorflow.keras.models import load_model
@@ -13,7 +14,8 @@ from tensorflow.keras.optimizers import Adam
 import tensorflow.keras.backend as K
 
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score, classification_report, confusion_matrix
-from sklearn.utils import class_weight
+from sklearn.model_selection import GroupKFold
+from sklearn.utils.class_weight import compute_class_weight
 
 import matplotlib.pyplot as plt
 
@@ -48,27 +50,6 @@ def plot_results(fold, train_result, val_result, out_fname, metric='Loss'):
   plt.savefig(out_fname)
   plt.clf()
 
-def get_partition(data, labels, users, sel_users, states, mode, is_train=False):
-  state_indices = [i for i,state in enumerate(states)]
-  indices = np.arange(len(users))[np.isin(users, sel_users) & np.isin(labels, state_indices)]
-  if mode != 'nonwear':
-    wake_idx = states.index('Wake')
-    wake_ext_idx = states.index('Wake_ext')
-  if is_train and mode != 'nonwear': # use extra wake samples only for training
-    # Determine LIDS score of wake samples  
-    wake_indices = indices[labels[indices] == wake_idx]
-    wake_samp = data[wake_indices,:,5].mean(axis=1) # LIDS mean
-    wake_perc = np.percentile(wake_samp,50)
-    # Choose extra wake samples whose LIDS score is less than 50% percentile of LIDS score of wake samples
-    wake_ext_indices = indices[labels[indices] == wake_ext_idx]
-    wake_ext_samp = data[wake_ext_indices,:,5].mean(axis=1) # LIDS mean
-    valid_indices = wake_ext_indices[wake_ext_samp < wake_perc]
-    indices = np.concatenate((indices[labels[indices] != wake_ext_idx], np.array(valid_indices)))
-  elif mode != 'nonwear':
-    indices = indices[labels[indices] != wake_ext_idx]
-  
-  return indices
-
 def get_best_model(indir, fold, mode='max'):
   files = os.listdir(indir)
   files = [fname for fname in files if fname.startswith('fold'+str(fold)) and fname.endswith('.h5')]
@@ -80,10 +61,11 @@ def get_best_model(indir, fold, mode='max'):
 def main(argv):
   indir = args.indir
   mode = args.mode # binary or multiclass or nonwear
+  modeldir = args.modeldir
   outdir = args.outdir
 
   if mode == 'multiclass':
-    states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM', 'Wake_ext']
+    states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM']
   elif mode == 'binary':
     states = ['Wake', 'Sleep', 'Wake_ext']
     collate_states = ['NREM 1', 'NREM 2', 'NREM 3', 'REM']
@@ -91,8 +73,7 @@ def main(argv):
     states = ['Wear', 'Nonwear']
     collate_states = ['Wake', 'NREM 1', 'NREM 2', 'NREM 3', 'REM']
 
-  valid_states = [state for state in states if state != 'Wake_ext']
-  num_classes = len(valid_states) 
+  num_classes = len(states) 
 
   if not os.path.exists(outdir):
     os.makedirs(outdir)
@@ -101,125 +82,82 @@ def main(argv):
   if not os.path.exists(resultdir):
     os.makedirs(resultdir)
 
+  # Hyperparameters
+  num_epochs = args.num_epochs
+  num_channels = args.num_channels # number of raw data channels
+  feat_channels = args.feat_channels # Add ENMO, z-angle and LIDS as additional channels
+  hp_iter = args.hp_iter # No. of hyperparameter iterations
+  hp_epochs = args.hp_epochs # No. of hyperparameter validation epochs
+
   # Read data from disk
   data = pd.read_csv(os.path.join(indir,'all_train_features_30.0s.csv'))
-  labels = data['label'].values
-  users = data['user'].values
+  ts = data['timestamp']
+  fnames = data['filename']
+  labels = data['label']
+  users = data['user'].astype(str).values
   if mode == 'binary':
     labels = np.array(['Sleep' if lbl in collate_states else lbl for lbl in labels])
   elif mode == 'nonwear':
     labels = np.array(['Wear' if lbl in collate_states else lbl for lbl in labels])
+  labels = np.array([states.index(i) if i in states else -1 for i in labels])
 
+  # Get valid values for CV split 
+  valid_indices = data[data['label'].isin(states)].index.values
+  # dummy values for partition as raw data cannot be loaded to memory
+  X = data[['ENMO_mean', 'ENMO_std', 'ENMO_mad']].values[valid_indices] 
+  y = labels[valid_indices]
+  groups = users[valid_indices]
+ 
   # Read raw data
-  #shape_df = pd.read_csv(os.path.join(indir,'datashape_30.0s.csv'))
-  #num_samples = shape_df['num_samples'].values[0]
-  #seqlen = shape_df['num_timesteps'].values[0]
-  #n_channels = shape_df['num_channels'].values[0]
-  #raw_data = np.memmap(os.path.join(indir,'rawdata_30.0s.npz'), dtype='float32', mode='r', shape=(num_samples, seqlen, n_channels))
-
   fp = h5py.File(os.path.join(indir, 'all_train_rawdata_30.0s.h5'), 'r')
   raw_data = fp['data']
   [num_samples, seqlen, n_channels] = raw_data.shape
 
-  # Hyperparameters
-  lr = args.lr # learning rate
-  num_epochs = args.num_epochs
-  batch_size = args.batchsize
-  max_seqlen = 1504
-  num_channels = args.num_channels # number of raw data channels
-  feat_channels = args.feat_channels # Add ENMO, z-angle and LIDS as additional channels
-
   # Use nested cross-validation based on users
   # Outer CV
-  unique_users = list(set(users))
-  random.shuffle(unique_users)
-  cv_splits = 5
-  user_cnt = Counter(users[np.isin(labels,valid_states)]).most_common()
-  samp_per_fold = len(users)//cv_splits
+  outer_cv_splits = 5; inner_cv_splits = 5
+  out_fold = 0; predictions = []
+  outer_group_kfold = GroupKFold(n_splits=outer_cv_splits)
+  for train_indices, test_indices in outer_group_kfold.split(X, y, groups):
+    out_fold += 1  
+    print('Evaluating fold %d' % (out_fold))
+    out_fold_train_indices = valid_indices[train_indices]; out_fold_test_indices = valid_indices[test_indices]
+    out_fold_y_train = labels[out_fold_train_indices]; out_fold_y_test = labels[out_fold_test_indices]
+    out_fold_users_train = users[out_fold_train_indices]; out_fold_users_test = users[out_fold_test_indices]
+    out_fold_ts_test = ts[out_fold_test_indices]
+    out_fold_fnames_test = fnames[out_fold_test_indices]
 
-  # Get users to be used in test for each fold such that each fold has similar
-  # number of samples
-  fold_users = [[] for i in range(cv_splits)]
-  fold_cnt = [[] for i in range(cv_splits)]
-  for user,cnt in user_cnt:
-    idx = -1; maxdiff = 0
-    for j in range(cv_splits):
-      if (samp_per_fold - sum(fold_cnt[j])) > maxdiff:
-        maxdiff = samp_per_fold - sum(fold_cnt[j])
-        idx = j
-    fold_users[idx].append(user)    
-    fold_cnt[idx].append(cnt)
+    class_wts = compute_class_weight(class_weight='balanced', classes=np.unique(out_fold_y_train),
+                                     y=out_fold_y_train)
 
-  predictions = []
-  if mode != 'nonwear':
-    wake_idx = states.index('Wake')
-    wake_ext_idx = states.index('Wake_ext')
-  for fold in range(cv_splits):
-    print('Evaluating fold %d' % (fold+1))
-    test_users = fold_users[fold]
-    trainval_users = [(key,val) for key,val in user_cnt if key not in test_users]
-    random.shuffle(trainval_users)
-    # validation data is approximately 10% of total samples
-    val_samp = 0.1*sum([tup[1] for tup in user_cnt])
-    nval = 0; val_sum = 0
-    while (val_sum < val_samp):
-      val_sum += trainval_users[nval][1]
-      nval += 1
-    val_users = [key for key,val in trainval_users[:nval]]
-    train_users = [key for key,val in trainval_users[nval:]]
-    print('#users: Train = {:d}, Val = {:d}, Test = {:d}'.format(len(train_users), len(val_users), len(test_users)))
+    # Hyperparameter selection
+    grp_X_train = X[train_indices]; grp_y_train = y[train_indices]; grp_users_train = groups[train_indices]
+    for hp in range(1):#hp_iter):
+      lr = 10 ** (-np.random.randint(args.lr_low, args.lr_high+1)) 
+      maxnorm = np.random.randint(args.maxnorm_low, args.maxnorm_high+1) 
+      batchsize = np.random.randint(args.batchsize_low, args.batchsize_high+1)
+      batchsize = batchsize - batchsize%8 # make batchsize multiple of 8
 
-    # Create partitions
-    # make a copy to change wake_ext for this fold 
-    fold_labels = np.array([states.index(lbl) if lbl in states else -1 for lbl in labels])
-    train_indices = get_partition(raw_data, fold_labels, users, train_users, states, mode, is_train=True)
-    val_indices = get_partition(raw_data, fold_labels, users, val_users, states, mode)
-    test_indices = get_partition(raw_data, fold_labels, users, test_users, states, mode)
-    nsamples = len(train_indices) + len(val_indices) + len(test_indices)
-    print('Train: {:0.2f}%, Val: {:0.2f}%, Test: {:0.2f}%'\
-            .format(len(train_indices)*100.0/nsamples, len(val_indices)*100.0/nsamples,\
-                    len(test_indices)*100.0/nsamples))
+      # Inner CV 
+      inner_group_kfold = GroupKFold(n_splits=inner_cv_splits)
+      for grp_train_idx, grp_val_idx in \
+          inner_group_kfold.split(grp_X_train, grp_y_train, grp_users_train):
+        in_fold_train_indices = valid_indices[train_indices[grp_train_idx]]
+        in_fold_val_indices = valid_indices[train_indices[grp_val_idx]]
 
-    if mode != 'nonwear':
-      chosen_indices = train_indices[fold_labels[train_indices] != wake_ext_idx]
-    else:
-      chosen_indices = train_indices
-    class_wts = class_weight.compute_class_weight(class_weight='balanced', classes=np.unique(fold_labels[chosen_indices]),
-                                                  y=fold_labels[chosen_indices])
-    
-    # Rename wake_ext as wake for training samples
-    if mode != 'nonwear':
-      rename_indices = train_indices[fold_labels[train_indices] == wake_ext_idx]
-      fold_labels[rename_indices] = wake_idx
-
-    print('Train', Counter(np.array(fold_labels)[train_indices]))
-    print('Val', Counter(np.array(fold_labels)[val_indices]))
-    print('Test', Counter(np.array(fold_labels)[test_indices]))
-
-    # Data generators for computing statistics
-    stat_gen = DataGenerator(train_indices, raw_data, fold_labels, valid_states, partition='stat',\
-                              batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
-                              n_classes=num_classes, shuffle=True)
-    mean, std = stat_gen.fit()
-    np.savez(os.path.join(resultdir,'Fold'+str(fold+1)+'_stats'), mean=mean, std=std)
-
-    # Data generators for train/val/test
-    train_gen = DataGenerator(train_indices, raw_data, fold_labels, valid_states, partition='train',\
-                              batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
+        train_gen = DataGenerator(in_fold_train_indices, raw_data, labels, states, partition='train',\
+                              batch_size=batchsize, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
                               n_classes=num_classes, shuffle=True, augment=True, aug_factor=0.75, balance=True,
                               mean=mean, std=std)
-    val_gen = DataGenerator(val_indices, raw_data, fold_labels, valid_states, partition='val',\
-                            batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
+        val_gen = DataGenerator(in_fold_val_indices, raw_data, labels, states, partition='val',\
+                            batch_size=batchsize, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
                             n_classes=num_classes, mean=mean, std=std)
-    test_gen = DataGenerator(test_indices, raw_data, fold_labels, valid_states, partition='test',\
-                             batch_size=batch_size, seqlen=seqlen, n_channels=num_channels, feat_channels=feat_channels,\
-                             n_classes=num_classes, mean=mean, std=std)
 
 #    # Create model
 #    # Use batchnorm as first step since computing mean and std 
 #    # across entire dataset is time-consuming
 #    model = FCN(input_shape=(seqlen,num_channels+feat_channels), max_seqlen=max_seqlen,
-#                num_classes=len(valid_states), norm_max=args.maxnorm)
+#                num_classes=len(states), norm_max=args.maxnorm)
 #    #print(model.summary()); exit()
 #    model.compile(optimizer=Adam(lr=lr),
 #                  loss=focal_loss(),
@@ -257,26 +195,33 @@ def main(argv):
 #                        data.iloc[test_indices]['filename'], test_indices, y_true, probs))
 #
 #    # Save user report
-#    cv_save_classification_result(predictions, valid_states, 
+#    cv_save_classification_result(predictions, states, 
 #                                  os.path.join(resultdir,'fold'+str(fold+1)+'_deeplearning_' + mode + '_results.csv'), method='dl')
-#    cv_get_classification_report(predictions, mode, valid_states, method='dl')
+#    cv_get_classification_report(predictions, mode, states, method='dl')
 #  
-#  cv_get_classification_report(predictions, mode, valid_states, method='dl')
+#  cv_get_classification_report(predictions, mode, states, method='dl')
 #
 #  # Save user report
-#  cv_save_classification_result(predictions, valid_states,
+#  cv_save_classification_result(predictions, states,
 #                                os.path.join(resultdir,'deeplearning_' + mode + '_results.csv'), method='dl')
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--indir', type=str, help='input directory containing data and labels')
   parser.add_argument('--mode', type=str, default='binary', help='classification mode - binary/multiclass')
+  parser.add_argument('--modeldir', type=str, help='directory with pretrained models and normalization info')
   parser.add_argument('--outdir', type=str, help='output directory to store results and models')
-  parser.add_argument('--lr', type=float, default=0.001, help='learning rate')        
-  parser.add_argument('--batchsize', type=int, default=64, help='batch size')        
-  parser.add_argument('--maxnorm', type=float, default=1, help='maximum norm for constraint')        
   parser.add_argument('--num_epochs', type=int, default=30, help='number of epochs to run')        
   parser.add_argument('--num_channels', type=int, default=3, help='number of data channels')
   parser.add_argument('--feat_channels', type=int, default=0, help='number of feature channels')
+  # Hyperparameter selection
+  parser.add_argument('--hp_iter', type=int, default=10, help='#hyperparameter iterations')        
+  parser.add_argument('--hp_epochs', type=int, default=2, help='#hyperparam validation epochs')        
+  parser.add_argument('--lr_low', type=int, default=1, help='learning rate range - lower (log scale)')        
+  parser.add_argument('--lr_high', type=int, default=4, help='learning rate range - upper (log scale)')        
+  parser.add_argument('--batchsize_low', type=int, default=8, help='batch size range - lower')        
+  parser.add_argument('--batchsize_high', type=int, default=64, help='batch size range - upper')        
+  parser.add_argument('--maxnorm_low', type=float, default=1, help='maximum norm range - lower')        
+  parser.add_argument('--maxnorm_high', type=float, default=20, help='maximum norm range - upper')        
   args = parser.parse_args()
   main(args)
