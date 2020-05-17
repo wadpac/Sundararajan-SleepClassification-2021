@@ -79,6 +79,11 @@ def main(argv):
         scaler, cv_clf = joblib.load(open(os.path.join(modeldir, fname), 'rb'))
         x_test_sc = scaler.transform(x_test)
         fold_y_pred = cv_clf.predict_proba(x_test_sc)
+        if mode == 'multiclass':
+          fold_y_pred_collated = np.zeros((fold_y_pred[0].shape[0], len(fold_y_pred)))
+          for cls in range(len(fold_y_pred)):
+              fold_y_pred_collated[:,cls] = fold_y_pred[cls][:,1]
+          fold_y_pred = fold_y_pred_collated
       else:
         cv_clf = pickle.load(open(os.path.join(modeldir, fname), 'rb'))
         cv_clf = cv_clf.best_estimator_

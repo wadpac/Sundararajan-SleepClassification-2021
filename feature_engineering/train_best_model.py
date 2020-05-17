@@ -79,6 +79,11 @@ def main(argv):
   best_model_fname = [fname for fname in model_fnames if ('fold'+str(best_fold) in fname) and mode in fname][0]
   scaler, cv_clf = joblib.load(open(os.path.join(modeldir, best_model_fname), 'rb'))
   clf = cv_clf.best_estimator_
+  if mode == 'multiclass':
+    class_wt = {}
+    for i in range(len(clf.class_weight)):
+        class_wt[i] = clf.class_weight[i][1]
+    clf.class_weight = class_wt
   if clf.max_depth is not None:
     print('Best model is RF with #trees = %d, depth = %d' % (clf.n_estimators, clf.max_depth))
   else:
