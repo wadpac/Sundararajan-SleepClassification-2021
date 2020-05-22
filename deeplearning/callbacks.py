@@ -4,10 +4,9 @@ from tensorflow.keras.callbacks import Callback
 
 # Use custom callback for F1-score, precision and recall
 class Metrics(Callback):
-  def __init__(self, val_data, batch_size=32, min_epoch=5):
+  def __init__(self, val_data, batch_size=32):
     self.validation_data = val_data # validation generator  
     self.batch_size = batch_size
-    self.min_epoch = min_epoch
     self.val_precision = []
     self.val_recall = []
     self.val_f1 = []
@@ -42,10 +41,7 @@ class Metrics(Callback):
     self.val_precision.append(val_prec)
     self.val_recall.append(val_rec)
     self.val_f1.append(val_f1)
-    if epoch >= self.min_epoch: # save validation metrics only after first few epochs
-      logs['val_f1'] = val_f1
-    else:
-      logs['val_f1'] = 0.0
+    logs['val_f1'] = val_f1
 
     print(' - val_f1: {:0.4f}'.format(val_f1))
 
