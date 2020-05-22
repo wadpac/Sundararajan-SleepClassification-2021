@@ -67,7 +67,7 @@ class DataGenerator(Sequence):
       indices = np.array(indices[:orig_sz])
       
     # Generate data
-    X, y = self.__data_generation__(indices)
+    X, y = self.__data_generation__(np.sort(indices))
     return X, y
 
   def __data_generation__(self, indices):
@@ -125,8 +125,10 @@ class DataGenerator(Sequence):
             angz = get_angle_z(aug_x[:,:,0], aug_x[:,:,1], aug_x[:,:,2])[:,:,np.newaxis]         
             LIDS = get_LIDS(aug_x[:,:,0], aug_x[:,:,1], aug_x[:,:,2])[:,:,np.newaxis] 
             aug_x = np.concatenate((aug_x, ENMO, angz, LIDS), axis=-1) 
-        X[offset+N:offset+N+aug_sz[cls],:,:] = aug_x
-        offset += samp_sz[cls] + aug_sz[cls]
+          X[offset+N:offset+N+aug_sz[cls],:,:] = aug_x
+          offset += aug_sz[cls]
+        offset += samp_sz[cls]
+
       # Shuffle original and augmented data
       idx = np.arange(self.batch_size)
       np.random.shuffle(idx)
