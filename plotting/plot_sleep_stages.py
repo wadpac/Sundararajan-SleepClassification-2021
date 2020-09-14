@@ -92,10 +92,12 @@ def main(argv):
       axes[i].plot(np.arange(span_len), z[i*span:(i+1)*span], 'b-', linewidth=5)
 
       sub_timestamp = timestamp[i*span:(i+1)*span]
+      sub_timestamp = [ts.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] for ts in sub_timestamp] 
       nticks = len(axes[i].get_xticklabels())-2 # plot doesnt seem to display first and last tick
       step = span//(nticks-1)
-      sub_ts = [0] + list(sub_timestamp[::step]) + [sub_timestamp.iloc[-1]] + [0]
-      axes[i].set_xticklabels(sub_ts, fontsize=27)
+      sub_ts = [0] + list(sub_timestamp[::step]) + [sub_timestamp[-1]] + [0]
+      axes[i].set_xticklabels(sub_ts, fontsize=30)
+      axes[i].yaxis.set_tick_params(labelsize=40)
       
       sub_nonwear = label[i*span:(i+1)*span] == 'Nonwear'
       handle = plot_intervals(axes[i], sub_nonwear, 'red', label='Nonwear')

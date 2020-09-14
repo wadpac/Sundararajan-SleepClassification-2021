@@ -2,7 +2,7 @@ import sys,os
 import numpy as np
 import pandas as pd
 from sklearn.metrics import precision_recall_fscore_support, classification_report
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, ttest_ind
 
 import matplotlib
 matplotlib.use('Agg')
@@ -71,7 +71,14 @@ def main(argv):
   poor_wake_r, _ = spearmanr(poor_sleep_perc, poor_wake_fsc)
   poor_sleep_r, _ = spearmanr(poor_sleep_perc, poor_sleep_fsc)
   poor_r, _ = spearmanr(poor_sleep_perc, poor_fscore)
-  
+ 
+  print(np.array(healthy_wake_fsc).mean()-np.array(poor_wake_fsc).mean())
+  wake_t, wake_p = ttest_ind(healthy_wake_fsc, poor_wake_fsc, equal_var=False)
+  print('Wake p = {:0.4f}'.format(wake_p))
+  print(np.array(healthy_sleep_fsc).mean() - np.array(poor_sleep_fsc).mean())
+  sleep_t, sleep_p = ttest_ind(healthy_sleep_fsc, poor_sleep_fsc, equal_var=False)
+  print('Sleep p = {:0.4f}'.format(sleep_p))
+
   plt.plot(healthy_sleep_perc, healthy_wake_fsc, 'g*', label='wake (r={:2f})'.format(healthy_wake_r))
   plt.plot(healthy_sleep_perc, healthy_sleep_fsc, 'ro', label='sleep (r={:2f})'.format(healthy_sleep_r))
   plt.plot(healthy_sleep_perc, healthy_fscore, 'bs', label='healthy (r={:2f})'.format(healthy_r))

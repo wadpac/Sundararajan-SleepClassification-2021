@@ -3,7 +3,8 @@ import pandas as pd
 from collections import Counter
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score,\
                             classification_report, confusion_matrix,\
-                            roc_auc_score, average_precision_score, precision_recall_curve
+                            roc_auc_score, average_precision_score, precision_recall_curve,\
+                            cohen_kappa_score
 from sklearn_hierarchical_classification.metrics import h_fbeta_score, multi_labeled, fill_ancestors
 from sklearn_hierarchical_classification.constants import ROOT
 from networkx import DiGraph
@@ -144,7 +145,7 @@ def cv_get_classification_report(pred_list, mode, sleep_states, method='feat_eng
 	        confusion_mat[i][2], confusion_mat[i][3], confusion_mat[i][4]))
     print('\n')
 
-def cv_classification_report(infile, mode='binary', smooth=True):
+def cv_classification_report(infile, mode='binary', agg='fold', smooth=True):
   df = pd.read_csv(infile)
   
   sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
@@ -155,64 +156,123 @@ def cv_classification_report(infile, mode='binary', smooth=True):
   else:
     pred_cols = ['pred_'+state for state in sleep_states]
   nclasses = len(true_cols)
-  nfolds = len(set(df['Fold']))
-  
-  metrics = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'accuracy':0.0, 'AP':0.0}
+ 
+  if agg == 'fold':
+    num_groups = len(set(df['Fold']))
+  else:
+    num_groups = len(set(df['Users']))
+
+  metrics = {'precision': np.zeros((num_groups,)),\
+             'recall': np.zeros((num_groups,)),\
+             'f1-score': np.zeros((num_groups,)),\
+             'accuracy': np.zeros((num_groups,)),\
+             'AP': np.zeros((num_groups,)),\
+             'kappa': np.zeros((num_groups,))}
   class_metrics = {}
   for state in sleep_states:
-    class_metrics[state] = {'precision':0.0, 'recall': 0.0, 'f1-score':0.0, 'AP':0.0, 'samples':0.0}
-  
-  for fold in range(nfolds):  
-    # Get overall scores excluding nonwear
-    true_prob = df[df['Fold'] == fold+1][true_cols].values
-    valid_indices = true_prob.sum(axis=1) > 0
-    true_prob = true_prob[valid_indices]
-    y_true = true_prob.argmax(axis=1)
-    pred_prob = df[df['Fold'] == fold+1][pred_cols].values[valid_indices]
-    pred_prob = pred_prob/pred_prob.sum(axis=1).reshape(-1,1)
-    pred_prob[np.isnan(pred_prob)] = 1.0/nclasses
-    y_pred = pred_prob.argmax(axis=1)
-    prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred, average='macro')
-    acc = accuracy_score(y_true, y_pred)
-    auc = roc_auc_score(true_prob, pred_prob, average='macro', multi_class='ovr')
-    ap = average_precision_score(true_prob, pred_prob, average='macro')
-    metrics['precision'] += prec; metrics['recall'] += rec
-    metrics['f1-score'] += fsc; metrics['accuracy'] += acc
-    metrics['AP'] += ap
-    print('Fold %d: F-score = %0.2f, AP=%0.2f' % (fold+1, fsc, ap))
-
-    # Get metrics per class except Nonwear
-    fold_class_metrics = classification_report(y_true, y_pred, labels=sleep_labels,
-                                   target_names=sleep_states, output_dict=True)
-    for idx,state in enumerate(sleep_states):
-      class_metrics[state]['precision'] += fold_class_metrics[state]['precision']
-      class_metrics[state]['recall'] += fold_class_metrics[state]['recall']
-      class_metrics[state]['f1-score'] += fold_class_metrics[state]['f1-score']
-      class_metrics[state]['samples'] += fold_class_metrics[state]['support']
-      ap = average_precision_score(true_prob[:,idx], pred_prob[:,idx])
-      class_metrics[state]['AP'] += ap
+    class_metrics[state] = {'precision': np.zeros((num_groups,)),\
+                            'recall': np.zeros((num_groups,)),\
+                            'f1-score': np.zeros((num_groups,)),\
+                            'AP': np.zeros((num_groups,)),\
+                            'samples': 0.0}
  
-  # Average metrics across all folds
+  if agg == 'fold':
+    for fold in range(num_groups):  
+      # Get overall scores excluding nonwear
+      true_prob = df[df['Fold'] == fold+1][true_cols].values
+      valid_indices = true_prob.sum(axis=1) > 0
+      true_prob = true_prob[valid_indices]
+      y_true = true_prob.argmax(axis=1)
+      pred_prob = df[df['Fold'] == fold+1][pred_cols].values[valid_indices]
+      pred_prob = pred_prob/pred_prob.sum(axis=1).reshape(-1,1)
+      pred_prob[np.isnan(pred_prob)] = 1.0/nclasses
+      y_pred = pred_prob.argmax(axis=1)
+      prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred, average='macro')
+      acc = accuracy_score(y_true, y_pred)
+      auc = roc_auc_score(true_prob, pred_prob, average='macro', multi_class='ovr')
+      ap = average_precision_score(true_prob, pred_prob, average='macro')
+      kappa = cohen_kappa_score(y_true, y_pred)
+      metrics['precision'][fold] = prec; metrics['recall'][fold] = rec
+      metrics['f1-score'][fold] = fsc; metrics['accuracy'][fold] = acc
+      metrics['AP'][fold] = ap
+      metrics['kappa'][fold] = kappa
+  
+      # Get metrics per class except Nonwear
+      fold_class_metrics = classification_report(y_true, y_pred, labels=sleep_labels,
+                                     target_names=sleep_states, output_dict=True)
+      for idx,state in enumerate(sleep_states):
+        class_metrics[state]['samples'] += fold_class_metrics[state]['support']
+        class_metrics[state]['precision'][fold] += fold_class_metrics[state]['precision']
+        class_metrics[state]['recall'][fold] += fold_class_metrics[state]['recall']
+        class_metrics[state]['f1-score'][fold] += fold_class_metrics[state]['f1-score']
+        ap = average_precision_score(true_prob[:,idx], pred_prob[:,idx])
+        class_metrics[state]['AP'][fold] += ap
+  else: # Aggregate by user
+    users = list(set(df['Users']))
+    for uidx,user in enumerate(users):  
+      # Get overall scores excluding nonwear
+      true_prob = df[df['Users'] == user][true_cols].values
+      valid_indices = true_prob.sum(axis=1) > 0
+      true_prob = true_prob[valid_indices]
+      y_true = true_prob.argmax(axis=1)
+      if len(set(y_true)) < 2:
+        continue
+      pred_prob = df[df['Users'] == user][pred_cols].values[valid_indices]
+      pred_prob = pred_prob/pred_prob.sum(axis=1).reshape(-1,1)
+      pred_prob[np.isnan(pred_prob)] = 1.0/nclasses
+      y_pred = pred_prob.argmax(axis=1)
+      prec, rec, fsc, sup = precision_recall_fscore_support(y_true, y_pred, average='macro')
+      acc = accuracy_score(y_true, y_pred)
+      auc = roc_auc_score(true_prob, pred_prob, average='macro', multi_class='ovr')
+      ap = average_precision_score(true_prob, pred_prob, average='macro')
+      kappa = cohen_kappa_score(y_true, y_pred)
+      metrics['precision'][uidx] = prec; metrics['recall'][uidx] = rec
+      metrics['f1-score'][uidx] = fsc; metrics['accuracy'][uidx] = acc
+      metrics['AP'][uidx] = ap
+      metrics['kappa'][uidx] = kappa
+  
+      # Get metrics per class except Nonwear
+      user_class_metrics = classification_report(y_true, y_pred, labels=sleep_labels,
+                                     target_names=sleep_states, output_dict=True)
+      for idx,state in enumerate(sleep_states):
+        class_metrics[state]['samples'] += user_class_metrics[state]['support']
+        class_metrics[state]['precision'][uidx] += user_class_metrics[state]['precision']
+        class_metrics[state]['recall'][uidx] += user_class_metrics[state]['recall']
+        class_metrics[state]['f1-score'][uidx] += user_class_metrics[state]['f1-score']
+        ap = average_precision_score(true_prob[:,idx], pred_prob[:,idx])
+        class_metrics[state]['AP'][uidx] += ap
+
+    metrics['precision'] = metrics['precision'][np.nonzero(metrics['precision'])]
+    metrics['recall'] = metrics['recall'][np.nonzero(metrics['recall'])]
+    metrics['f1-score'] = metrics['f1-score'][np.nonzero(metrics['f1-score'])]
+    metrics['accuracy'] = metrics['accuracy'][np.nonzero(metrics['accuracy'])]
+    metrics['AP'] = metrics['AP'][np.nonzero(metrics['AP'])]
+    metrics['kappa'] = metrics['kappa'][np.nonzero(metrics['kappa'])]
+
+    for idx,state in enumerate(sleep_states):
+      class_metrics[state]['precision'] = class_metrics[state]['precision'][np.nonzero(class_metrics[state]['precision'])]
+      class_metrics[state]['recall'] = class_metrics[state]['recall'][np.nonzero(class_metrics[state]['recall'])]
+      class_metrics[state]['f1-score'] = class_metrics[state]['f1-score'][np.nonzero(class_metrics[state]['f1-score'])]
+      class_metrics[state]['AP'] = class_metrics[state]['AP'][np.nonzero(class_metrics[state]['AP'])]
+
+    num_groups = len(metrics['AP'])
+
+
   for key in metrics.keys():
-    metrics[key] = metrics[key]/nfolds
-    print('{} = {:0.4f}'.format(key, metrics[key]))
+    print('{} = {:0.4f} +/- {:0.4f}'.format(key, metrics[key].mean(), metrics[key].std()))
 
   # Classwise report
   sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
   print('\nClass\t\tPrecision\tRecall\t\tF1-score\tAP\t\tSamples')
   for state in sleep_states:
-    class_metrics[state]['precision'] = class_metrics[state]['precision'] / nfolds
-    class_metrics[state]['recall'] = class_metrics[state]['recall'] / nfolds
-    class_metrics[state]['f1-score'] = class_metrics[state]['f1-score'] / nfolds
-    class_metrics[state]['AP'] = class_metrics[state]['AP'] / nfolds
     print('%s\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%0.4f\t\t%d' % 
-                      (state, class_metrics[state]['precision'],
-                      class_metrics[state]['recall'], 
-                      class_metrics[state]['f1-score'],
-                      class_metrics[state]['AP'],
+                      (state, class_metrics[state]['precision'].mean(),
+                      class_metrics[state]['recall'].mean(), 
+                      class_metrics[state]['f1-score'].mean(),
+                      class_metrics[state]['AP'].mean(),
                       class_metrics[state]['samples']))
-  print('\n')
-  
+  print('\n') 
+
   ################################ Confusion matrix ##################################
   sleep_states = [col.split('_')[1] for col in df.columns if col.startswith('true')]
   sleep_labels = [idx for idx,state in enumerate(sleep_states)]
@@ -223,17 +283,31 @@ def cv_classification_report(infile, mode='binary', smooth=True):
     pred_cols = [col for col in df.columns if col.startswith('pred')]
   nclasses = len(true_cols)
   confusion_mat = np.zeros((len(sleep_states),len(sleep_states)))
-  for fold in range(nfolds):
-    true_prob = df[df['Fold'] == fold+1][true_cols].values  
-    y_true = true_prob.argmax(axis=1)
-    pred_prob = df[df['Fold'] == fold+1][pred_cols].values 
-    y_pred = pred_prob.argmax(axis=1)
-    fold_conf_mat = confusion_matrix(y_true, y_pred, labels=sleep_labels).astype(np.float)
-    for idx,state in enumerate(sleep_states):
-      fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == sleep_labels[idx]]))
-    confusion_mat = confusion_mat + fold_conf_mat
 
-  confusion_mat = confusion_mat / nfolds
+  if agg == 'fold':
+    for fold in range(num_groups):
+      true_prob = df[df['Fold'] == fold+1][true_cols].values  
+      y_true = true_prob.argmax(axis=1)
+      pred_prob = df[df['Fold'] == fold+1][pred_cols].values 
+      y_pred = pred_prob.argmax(axis=1)
+      fold_conf_mat = confusion_matrix(y_true, y_pred, labels=sleep_labels).astype(np.float)
+      for idx,state in enumerate(sleep_states):
+        fold_conf_mat[idx,:] = fold_conf_mat[idx,:] / float(len(y_true[y_true == sleep_labels[idx]]))
+      confusion_mat = confusion_mat + fold_conf_mat
+  else:
+    for uidx,user in enumerate(users):
+      true_prob = df[df['Users'] == user][true_cols].values  
+      y_true = true_prob.argmax(axis=1)
+      if len(set(y_true)) < 2:
+        continue
+      pred_prob = df[df['Users'] == user][pred_cols].values 
+      y_pred = pred_prob.argmax(axis=1)
+      user_conf_mat = confusion_matrix(y_true, y_pred, labels=sleep_labels).astype(np.float)
+      for idx,state in enumerate(sleep_states):
+        user_conf_mat[idx,:] = user_conf_mat[idx,:] / float(len(y_true[y_true == sleep_labels[idx]]))
+      confusion_mat = confusion_mat + user_conf_mat
+
+  confusion_mat = confusion_mat / num_groups
   if mode == 'binary':
     print('ConfMat\tWake\tSleep\n')
     for i in range(confusion_mat.shape[0]):
