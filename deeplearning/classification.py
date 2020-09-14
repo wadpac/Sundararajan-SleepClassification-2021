@@ -9,7 +9,10 @@ import h5py
 import shutil
 
 import tensorflow as tf
-from tensorflow.keras.models import load_model
+from tensorflow.keras import Input, Model
+from tensorflow.keras.layers import Dense, Lambda, Dropout
+from tensorflow.keras.constraints import MaxNorm
+from tensorflow.keras.initializers import glorot_uniform
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 import tensorflow.keras.backend as K
@@ -56,13 +59,31 @@ def plot_results(fold, train_result, val_result, out_fname, metric='Loss'):
   plt.savefig(out_fname)
   plt.clf()
 
-def get_best_model(indir, fold, mode='max'):
+def get_best_model(indir, mode='max'):
   files = os.listdir(indir)
-  files = [fname for fname in files if fname.startswith('fold'+str(fold)) and fname.endswith('.h5')]
-  metric = np.array([float(fname.split('.h5')[0].split('-')[2]) for fname in files])
-  epoch = np.array([int(fname.split('.h5')[0].split('-')[1]) for fname in files])
+  files = [fname for fname in files if fname.endswith('.h5')]
+  metric = np.array([float(fname.split('.h5')[0].split('-')[1]) for fname in files])
+  epoch = np.array([int(fname.split('.h5')[0].split('-')[0]) for fname in files])
   best_idx = np.argmax(metric) if mode == 'max' else np.argmin(metric)
   return files[best_idx], epoch[best_idx], metric[best_idx]
+
+def create_resnet_model(seqlen, num_channels, maxnorm, modeldir, dense_units, num_classes):
+  resnet_model = Resnet(input_shape=(seqlen,num_channels), norm_max=maxnorm)
+  # Load weights from pretrained model
+  resnet_model.load_weights(os.path.join(modeldir, 'pretrained_resnet.h5'))
+  samp = Input(shape=(seqlen, num_channels))
+  enc_samp = resnet_model(samp)
+  dense_out = Dense(dense_units, activation='relu',
+                 kernel_constraint=MaxNorm(maxnorm,axis=[0,1]),
+                 bias_constraint=MaxNorm(maxnorm,axis=0),
+                 kernel_initializer=glorot_uniform(seed=0), name='FC1')(enc_samp)
+  dense_out = Dropout(rate=0.2)(dense_out)
+  output = Dense(num_classes, activation='softmax',
+                 kernel_constraint=MaxNorm(maxnorm,axis=[0,1]),
+                 bias_constraint=MaxNorm(maxnorm,axis=0),
+                 kernel_initializer=glorot_uniform(seed=0), name='output')(dense_out)
+  model = Model(inputs=samp, outputs=output)
+  return model
 
 def main(argv):
   indir = args.indir
@@ -101,6 +122,12 @@ def main(argv):
   feat_channels = args.feat_channels # Add ENMO, z-angle and LIDS as additional channels
   batchsize = args.batchsize # Batchsize
   hp_epochs = args.hp_epochs # No. of hyperparameter validation epochs
+  lr = args.lr # Learning rate
+  batchsize = args.batchsize # Batch size
+
+  resultdir = os.path.join(outdir,mode,'lr-{:4f}_batchsize-{:d}'.format(lr, batchsize))
+  if not os.path.exists(resultdir):
+    os.makedirs(resultdir)
 
   model_hyperparam = {}
   model_hyperparam['maxnorm'] = [0.5, 1.0, 2.0, 3.0]
@@ -118,12 +145,16 @@ def main(argv):
     labels = np.array(['Sleep' if lbl in collate_states else lbl for lbl in labels])
   elif mode == 'nonwear':
     labels = np.array(['Wear' if lbl in collate_states else lbl for lbl in labels])
-  labels = np.array([states.index(i) if i in states else -1 for i in labels])
+
+#  unique_users = list(set(users))
+#  random.shuffle(unique_users)
+#  unique_users = unique_users[:10]
 
   num_classes = len(states)
 
   # Get valid values for CV split 
   valid_indices = data[labels != -1].index.values
+  
   # dummy values for partition as raw data cannot be loaded to memory
   X = data[['ENMO_mean', 'ENMO_std', 'ENMO_mad']].values[valid_indices] 
   y = labels[valid_indices]
