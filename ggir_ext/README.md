@@ -19,6 +19,6 @@ These models were trained with scikit-learn version 0.22.1. Loading these models
 As you will notice the R code uses R package reticulate as interface to Python. At the moment this construction does not facilitate parallel processing of multiple data files like how GGIR is able to do when it uses its own vanHees heuristic.
 
 
-# Sundararajan Sleep-Wake-Nonwear classification via Python
+# Sundararajan Sleep-Wake-Nonwear classification in Python (without R interface)
 
 Use https://github.com/wadpac/SleepStageClassification/blob/master/ggir_ext/get_sleep_stage.py
