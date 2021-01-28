@@ -1,11 +1,5 @@
-# SleepStageClassification
-Classification of sleep stages using accelerometer data
+This repository includes the code related toSundararajan et al. 2021 Sleep classification from wrist-worn accelerometer data using random forests in Nature Scientific Reports.  https://www.nature.com/articles/s41598-020-79217-x
 
-## 1. Preprocessing
-This involves extracting necessary information from various accelerometer brands and storing them in specific standard formats for use with machine learning approaches.
+For instructions on how to use the trained sleep/wake/non-wear classification model see: https://github.com/wadpac/SleepStageClassification/blob/master/ggir_ext
 
-## 2. Feature engineering
-This approach involves extracting domain-related features deemed important by sleep / activity recognition researchers and using conventional machine learning techniques to classify sleep stages.
-
-## 3. Deep learning
-This approach involves extracting features from raw data extracted in Step 1.
+The other folders of this repository are mainly related to the training of the model and the various experiments as described in the paper.
