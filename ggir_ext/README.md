@@ -21,4 +21,4 @@ As you will notice the R code uses R package reticulate as interface to Python. 
 
 # Sundararajan Sleep-Wake-Nonwear classification in Python (without R interface)
 
-Use https://github.com/wadpac/SleepStageClassification/blob/master/ggir_ext/get_sleep_stage.py
+Use https://github.com/wadpac/SleepStageClassification/blob/master/ggir_ext/get_sleep_stage.py. This only applies the model to an accelerometer time series, it does not offer file reading, auto-calibration or report generation functionalities like GGIR (above) does.
